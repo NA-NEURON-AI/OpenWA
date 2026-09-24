@@ -1,4 +1,6 @@
-import { IncomingMessage, MessageType } from '../interfaces/whatsapp-engine.interface';
+import { EditedMessage, IncomingMessage, MessageContact, MessageType } from '../interfaces/whatsapp-engine.interface';
+import type { SerializedWid } from '../types/whatsapp-web-js.types';
+import { chatKind } from '../identity/wa-id';
 
 /**
  * Map a whatsapp-web.js `MessageTypes` token to the engine-neutral {@link MessageType}, so no
@@ -27,8 +29,16 @@ export function mapWwebjsMessageType(raw: string): MessageType {
     case 'vcard':
     case 'multi_vcard':
       return 'contact';
+    case 'call_log':
+      return 'call';
+    case 'poll_creation':
+      return 'poll';
     case 'revoked':
       return 'revoked';
+    case 'order':
+      return 'order';
+    case 'product':
+      return 'product';
     default:
       return 'unknown';
   }
@@ -40,7 +50,13 @@ export function mapWwebjsMessageType(raw: string): MessageType {
  * unit-testable without constructing a full wwebjs `Message`.
  */
 export interface RawMessageFields {
-  id: { _serialized: string };
+  /**
+   * Typed as the raw wid rather than `{ _serialized: string }`: a WA Web build that renamed the field
+   * to `$1` (#747) leaves `_serialized` undefined, and the old type made that state unrepresentable —
+   * so `$1` could not even be read without a cast, and the unsound `id: string` it fed was `undefined`
+   * at runtime on every inbound message.
+   */
+  id: SerializedWid;
   from: string;
   to: string;
   body: string;
@@ -52,7 +68,17 @@ export interface RawMessageFields {
   /** WIDs @mentioned in the message; whatsapp-web.js attaches this to every Message. */
   mentionedIds?: string[];
   /** Raw wwebjs payload; `notifyName` carries the sender's push name without an extra lookup. */
-  _data?: { notifyName?: string };
+  _data?: { notifyName?: string; ephemeralDuration?: number };
+  /** Set on `order` messages: the placed order's id, and the single-order token that unlocks its items. */
+  orderId?: string;
+  token?: string;
+  /** Set on `product` messages: the shared catalog product. */
+  productId?: string;
+  /** Product title / description. whatsapp-web.js exposes these only for a product card. */
+  title?: string;
+  description?: string;
+  /** The catalog owner's JID, on a shared product card. */
+  businessOwnerJid?: string;
 }
 
 /**
@@ -65,7 +91,12 @@ export function buildIncomingMessageBase(msg: RawMessageFields): IncomingMessage
   // for an incoming message it's the reverse. So the chat is `to` when fromMe, else `from`.
   const chatId = msg.fromMe ? msg.to : msg.from;
   const incoming: IncomingMessage = {
-    id: msg.id._serialized,
+    // Read `$1` before giving up, as the send/ack/status paths do (#762/#765/#773). This runs on the
+    // LIVE inbound path (`onMessage`/`onMessageCreate`), so on a renamed build without the build-time
+    // backport every arriving message otherwise carries `id: undefined`. The empty sentinel means
+    // "received, id unreadable" and is normalized to NULL where it is persisted — never to `''`, which
+    // the non-partial (sessionId, waMessageId) unique index would collide the second such message on.
+    id: msg.id._serialized ?? msg.id.$1 ?? '',
     from: msg.from,
     to: msg.to,
     chatId,
@@ -74,6 +105,7 @@ export function buildIncomingMessageBase(msg: RawMessageFields): IncomingMessage
     timestamp: msg.timestamp,
     fromMe: msg.fromMe,
     isGroup: chatId.endsWith('@g.us'),
+    kind: chatKind(chatId),
     // Flag status/story broadcasts here (the engine-specific `status@broadcast` pseudo-JID stays in
     // the adapter) so engine-neutral code can skip them without matching the literal.
     isStatusBroadcast: msg.to === 'status@broadcast' || chatId === 'status@broadcast',
@@ -102,5 +134,95 @@ export function buildIncomingMessageBase(msg: RawMessageFields): IncomingMessage
     incoming.contact = { pushName };
   }
 
+  // Ephemeral/disappearing-messages timer, when the chat has one set.
+  if (msg._data?.ephemeralDuration && msg._data.ephemeralDuration > 0) {
+    incoming.ephemeralDuration = msg._data.ephemeralDuration;
+  }
+
+  // Commerce ids, keyed off the mapped type so a stray `title` on some other message shape cannot
+  // fabricate a product. Without the id neither entry is actionable, so both are then left unset.
+  if (incoming.type === 'order' && msg.orderId) {
+    incoming.order = { orderId: msg.orderId, ...(msg.token ? { token: msg.token } : {}) };
+  } else if (incoming.type === 'product' && msg.productId) {
+    incoming.product = {
+      productId: msg.productId,
+      ...(msg.title ? { title: msg.title } : {}),
+      ...(msg.description ? { description: msg.description } : {}),
+      ...(msg.businessOwnerJid ? { businessOwnerJid: msg.businessOwnerJid } : {}),
+    };
+  }
+
   return incoming;
+}
+
+/**
+ * Project an engine-neutral message base into the public edit-event contract. Keeping this projection
+ * shared prevents the two adapters from drifting on identity, direction, group, type, or filter fields.
+ */
+export function buildEditedMessage(message: IncomingMessage, hasMedia: boolean): EditedMessage {
+  return {
+    messageId: message.id,
+    chatId: message.chatId,
+    body: message.body,
+    senderId: message.author ?? message.from,
+    from: message.from,
+    to: message.to,
+    fromMe: message.fromMe,
+    isGroup: message.isGroup,
+    type: message.type,
+    hasMedia,
+    ...(message.author ? { author: message.author } : {}),
+    ...(message.mentionedIds ? { mentionedIds: message.mentionedIds } : {}),
+    timestamp: message.timestamp,
+  };
+}
+
+/**
+ * The subset of whatsapp-web.js `Contact` properties we read synchronously (already on the resolved
+ * contact, no network call). Declared explicitly so {@link mapContactFields} is unit-testable without a
+ * full wwebjs `Contact`, and so the async getters stay out by construction.
+ */
+export interface RawContactFields {
+  id?: { _serialized?: string };
+  number?: string;
+  name?: string;
+  pushname?: string;
+  shortName?: string;
+  type?: string;
+  isMyContact?: boolean;
+  isWAContact?: boolean;
+  isBusiness?: boolean;
+  isEnterprise?: boolean;
+  verifiedName?: string;
+  verifiedLevel?: number;
+  isBlocked?: boolean;
+  labels?: string[];
+}
+
+/**
+ * Map the synchronous fields of a wwebjs `Contact` to a {@link MessageContact}, copying only the values
+ * that are set. No network calls, which on a per-message path would risk rate-limiting.
+ *
+ * With `full` false (the default) it returns just `name`/`pushName`, the long-standing payload. With
+ * `full` true (operator opt-in via `WEBHOOK_CONTACT_DETAILS`) it returns the complete field set.
+ */
+export function mapContactFields(contact: RawContactFields, full = false): MessageContact {
+  const out: MessageContact = {};
+  if (contact.name) out.name = contact.name;
+  if (contact.pushname) out.pushName = contact.pushname;
+  if (!full) return out;
+  const id = contact.id?._serialized;
+  if (id) out.id = id;
+  if (contact.number) out.number = contact.number;
+  if (contact.shortName) out.shortName = contact.shortName;
+  if (contact.type) out.type = contact.type;
+  if (contact.isMyContact !== undefined) out.isMyContact = contact.isMyContact;
+  if (contact.isWAContact !== undefined) out.isWAContact = contact.isWAContact;
+  if (contact.isBusiness !== undefined) out.isBusiness = contact.isBusiness;
+  if (contact.isEnterprise !== undefined) out.isEnterprise = contact.isEnterprise;
+  if (contact.verifiedName) out.verifiedName = contact.verifiedName;
+  if (contact.verifiedLevel !== undefined) out.verifiedLevel = contact.verifiedLevel;
+  if (contact.isBlocked !== undefined) out.isBlocked = contact.isBlocked;
+  if (contact.labels && contact.labels.length > 0) out.labels = contact.labels;
+  return out;
 }

@@ -2,7 +2,7 @@
 // so the no-await rule doesn't apply to them here.
 /* eslint-disable @typescript-eslint/require-await */
 import { HookManager } from './hook-manager.service';
-import { HookContext, HookResult } from './hook.interfaces';
+import { HookContext, HookResult, HookEvent } from './hook.interfaces';
 
 describe('HookManager', () => {
   let hm: HookManager;
@@ -125,6 +125,34 @@ describe('HookManager', () => {
     expect(res.data).toBe('original'); // but the errored mutation is not carried out on stop
   });
 
+  it('skips a result the caller cannot use, keeping an earlier handler rewrite', async () => {
+    const isMessage = (d: unknown) => typeof d === 'object' && d !== null && 'id' in d;
+    hm.register(
+      'redact',
+      'message:received',
+      async ctx => ({
+        continue: true,
+        data: { ...(ctx.data as object), body: '[redacted]' },
+      }),
+      10,
+    );
+    hm.register('bot', 'message:received', async () => ({ continue: true, data: null }), 100);
+
+    const guarded = await hm.execute<unknown>(
+      'message:received',
+      { id: 'm1', body: 'secret' },
+      {
+        source: 'test',
+        accept: isMessage,
+      },
+    );
+    expect(guarded.data).toEqual({ id: 'm1', body: '[redacted]' });
+
+    // Without `accept` any defined data is adopted, as before.
+    const unguarded = await hm.execute<unknown>('message:received', { id: 'm1', body: 'secret' }, { source: 'test' });
+    expect(unguarded.data).toBeNull();
+  });
+
   it('register/unregister/hasHooks/getHookCount track registrations', () => {
     expect(hm.hasHooks('session:created')).toBe(false);
     const id = hm.register('p', 'session:created', async ctx => ({ continue: true, data: ctx.data }));
@@ -183,5 +211,110 @@ describe('HookManager re-entrancy guard', () => {
     await manager.execute('message:received', { n: 1 }, { source: 'test' });
 
     expect(seen).toEqual(['received', 'sent']);
+  });
+});
+
+describe('HookManager priority', () => {
+  it('runs a non-numeric or non-finite priority at the default, keeping every other handler in order', async () => {
+    const hm = new HookManager();
+    const order: string[] = [];
+    const push = (name: string) => () => {
+      order.push(name);
+      return Promise.resolve({ continue: true });
+    };
+    hm.register('rewrite', 'message:sending', push('rewrite@50'), 50);
+    hm.register('junk', 'message:sending', push('junk'), 'high' as unknown as number);
+    hm.register('nan', 'message:sending', push('nan'), NaN);
+    hm.register('veto', 'message:sending', push('veto@10'), 10);
+
+    await hm.execute('message:sending', {}, { source: 't' });
+
+    expect(order).toEqual(['veto@10', 'rewrite@50', 'junk', 'nan']);
+  });
+
+  it('setPriority moves an existing registration and re-sorts its chain', async () => {
+    const hm = new HookManager();
+    const order: string[] = [];
+    hm.register('a', 'message:sent', () => (order.push('a'), Promise.resolve({ continue: true })), 100);
+    const id = hm.register('b', 'message:sent', () => (order.push('b'), Promise.resolve({ continue: true })), 200);
+
+    hm.setPriority(id, 1);
+    await hm.execute('message:sent', {}, { source: 't' });
+
+    expect(order).toEqual(['b', 'a']);
+  });
+
+  it('runs every handler once when one moves a later registration ahead of itself mid-chain', async () => {
+    const hm = new HookManager();
+    const order: string[] = [];
+    let cId = '';
+    hm.register('a', 'message:sent', () => (order.push('a'), Promise.resolve({ continue: true })), 10);
+    hm.register(
+      'b',
+      'message:sent',
+      () => {
+        order.push('b');
+        hm.setPriority(cId, 1);
+        return Promise.resolve({ continue: true });
+      },
+      20,
+    );
+    cId = hm.register('c', 'message:sent', () => (order.push('c'), Promise.resolve({ continue: true })), 30);
+
+    await hm.execute('message:sent', {}, { source: 't' });
+
+    expect(order).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('HookManager.isInFlight + selective re-entrancy guard (conversation.send pattern)', () => {
+  const SENDING: HookEvent[] = ['message:sending'];
+
+  it('isInFlight is false at the top level and true only inside a matching in-flight context', () => {
+    const hm = new HookManager();
+    expect(hm.isInFlight('message:sending')).toBe(false);
+    let matching = false;
+    let unrelated = false;
+    hm.runInFlight(SENDING, () => {
+      matching = hm.isInFlight('message:sending');
+      unrelated = hm.isInFlight('message:received');
+    });
+    expect(matching).toBe(true);
+    expect(unrelated).toBe(false);
+  });
+
+  it('currentInFlight reports the whole chain a handler runs under (what a sandbox dispatch forwards)', async () => {
+    const hm = new HookManager();
+    let seen: HookEvent[] = [];
+    hm.register('p', 'message:sent', async () => {
+      seen = hm.currentInFlight();
+      return { continue: true };
+    });
+    expect(hm.currentInFlight()).toEqual([]);
+    await hm.runInFlight(SENDING, () => hm.execute('message:sent', {}, { source: 't' }));
+    expect(seen).toEqual(['message:sending', 'message:sent']);
+  });
+
+  it('a top-level guarded send still fires message:sending for unrelated observers; genuine re-entrancy suppresses it', async () => {
+    const hm = new HookManager();
+    let observerCalls = 0;
+    hm.register('audit', 'message:sending', async ctx => {
+      observerCalls++;
+      return { continue: true, data: ctx.data };
+    });
+    // Mirrors the plugin-loader binding for ctx.conversations.send: guard ONLY on an already-in-flight event.
+    const runGuarded = <T>(events: HookEvent[], run: () => Promise<T>): Promise<T> =>
+      events.some(e => hm.isInFlight(e)) ? hm.runInFlight(events, run) : run();
+
+    // Top-level send: an unrelated audit/moderation observer MUST see the outbound message:sending.
+    await runGuarded(SENDING, () => hm.execute('message:sending', {}, { source: 'send' }));
+    expect(observerCalls).toBe(1);
+
+    // A send issued from WITHIN a message:sending handler's context (echo-loop) MUST be suppressed.
+    observerCalls = 0;
+    await hm.runInFlight(SENDING, () =>
+      runGuarded(SENDING, () => hm.execute('message:sending', {}, { source: 'reentrant-send' })),
+    );
+    expect(observerCalls).toBe(0);
   });
 });

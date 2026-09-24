@@ -5,8 +5,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { RedisThrottlerStorage } from './common/throttler/redis-throttler.storage';
+import { createThrottlerRedisClient } from './common/throttler/throttler-redis.client';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
+import { createBootDataSource } from './database/pg-boot-migrations';
 import { SessionModule } from './modules/session/session.module';
 import { MessageModule } from './modules/message/message.module';
 import { TemplateModule } from './modules/template/template.module';
@@ -21,6 +24,8 @@ import { InfraModule } from './modules/infra/infra.module';
 import { EventsModule } from './modules/events/events.module';
 import { ContactModule } from './modules/contact/contact.module';
 import { GroupModule } from './modules/group/group.module';
+import { ProfileModule } from './modules/profile/profile.module';
+import { CallModule } from './modules/call/call.module';
 import { LabelModule } from './modules/label/label.module';
 import { ChannelModule } from './modules/channel/channel.module';
 import { CacheModule } from './common/cache';
@@ -28,11 +33,19 @@ import { StorageModule } from './common/storage/storage.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { StatusModule } from './modules/status/status.module';
+import { MediaModule } from './modules/media/media.module';
+import { StatusStoreModule } from './modules/status-store/status-store.module';
+import { ChatMediaModule } from './modules/chat-media/chat-media.module';
+import { AutomationModule } from './modules/automation/automation.module';
+import { TakeoverModule } from './modules/takeover/takeover.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { HooksModule } from './core/hooks';
 import { PluginsModule } from './core/plugins';
 import { PluginsApiModule } from './modules/plugins/plugins.module';
-import { ExtensionsModule } from './plugins/extensions/extensions.module';
+import { AgentToolsModule } from './core/agent-tools/agent-tools.module';
+import { IntegrationModule } from './modules/integration/integration.module';
+import { SearchModule } from './modules/search/search.module';
+import { SqlitePermissionsBoot } from './database/sqlite-file-permissions';
 
 // Only import QueueModule if explicitly enabled to avoid Redis connection errors
 const queueModules: Array<Type | DynamicModule> = [];
@@ -42,6 +55,30 @@ if (process.env.QUEUE_ENABLED === 'true') {
     QueueModule: Type;
   };
   queueModules.push(queueModule.QueueModule);
+}
+
+// Global message search. Opt-out via SEARCH_ENABLED=false: the module (route + provider + registry)
+// is absent entirely — zero footprint, no DI wiring. Mirrors the queueModules/MCP conditional shape so
+// an opt-out deployment never even loads the search providers. Default is ON for zero-config first boot.
+const searchModules: Array<Type | DynamicModule> = [];
+if (process.env.SEARCH_ENABLED !== 'false') {
+  searchModules.push(SearchModule);
+}
+
+// Only mount the MCP server if explicitly enabled to avoid startup cost and
+// the SDK import (which pulls in @modelcontextprotocol/sdk) in non-MCP deployments.
+const mcpModules: Array<Type | DynamicModule> = [];
+if (process.env.MCP_ENABLED === 'true') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { McpModule } = require('./modules/mcp/mcp.module') as typeof import('./modules/mcp/mcp.module');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { version } = require('../package.json') as { version: string };
+  mcpModules.push(
+    McpModule.forRoot({
+      basePath: '/mcp',
+      serverInfo: { name: 'openwa', version },
+    }),
+  );
 }
 
 // Serve the bundled dashboard SPA from this same NestJS process/port when a build is
@@ -60,7 +97,20 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
       rootPath: DASHBOARD_DIST,
       // Let Nest own these so unknown API/socket routes return real 404s/JSON rather
       // than the SPA index.html fallback (Express 5 / path-to-regexp v8 wildcard syntax).
-      exclude: ['/api/{*splat}', '/socket.io/{*splat}'],
+      exclude: ['/api/{*splat}', '/socket.io/{*splat}', '/mcp', '/mcp/{*splat}'],
+      // Disable this module's OWN catch-all SPA fallback. main.ts already serves dashboard
+      // documents (it injects the per-response CSP nonce, which is why it must own them), and
+      // that handler is correctly narrow: it skips /assets and only answers extensionless paths
+      // or explicit text/html navigations. The built-in fallback here is not narrow — it answers
+      // EVERY unmatched GET with index.html, so a mistyped `<script src>` came back 200 HTML and
+      // the browser reported a JavaScript parse error instead of the real 404, hiding broken
+      // builds behind a confusing symptom. It is also outright broken when the install path
+      // contains a dot-segment (~/.openwa, a checkout under ~/.cache): it sends the index by
+      // ABSOLUTE path and Express's `send` refuses dot-segments, 404ing every client-side route.
+      // Turning it off fixes both, and makes behaviour identical on either path shape.
+      // ServeStaticModule has no explicit off switch, so this is a renderPath literal that no
+      // real request can match.
+      renderPath: '/__openwa_spa_fallback_owned_by_main_ts__',
     }),
   );
 }
@@ -86,7 +136,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
         const synchronize = configService.get<boolean>('database.synchronize', true);
         return {
           name: 'main',
-          type: 'sqlite' as const,
+          type: 'better-sqlite3' as const,
           database: configService.get<string>('database.database', './data/main.sqlite'),
           entities: [
             __dirname + '/modules/auth/**/*.entity{.ts,.js}',
@@ -107,6 +157,10 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
       name: 'data',
       imports: [ConfigModule],
       inject: [ConfigService],
+      // The postgres branch runs its boot migrations under a cross-replica advisory lock inside
+      // this factory (see pg-boot-migrations.ts) instead of TypeORM's unsynchronized built-in
+      // migrationsRun; the sqlite branches keep the library's default construction + initialize.
+      dataSourceFactory: createBootDataSource,
       useFactory: (configService: ConfigService) => {
         const dbType = configService.get<'sqlite' | 'postgres'>('dataDatabase.type', 'sqlite');
         const baseConfig = {
@@ -116,16 +170,28 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
             __dirname + '/modules/message/**/*.entity{.ts,.js}',
             __dirname + '/modules/template/**/*.entity{.ts,.js}',
             __dirname + '/engine/**/*.entity{.ts,.js}',
+            __dirname + '/modules/integration/**/*.entity{.ts,.js}',
+            __dirname + '/modules/status-store/**/*.entity{.ts,.js}',
+            __dirname + '/modules/automation/**/*.entity{.ts,.js}',
           ],
           migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
           logging: configService.get<boolean>('dataDatabase.logging', false),
         };
 
         if (dbType === 'postgres') {
+          // Schema selection: 'public' (default) is a no-op vs the historical behavior. A non-public
+          // schema additionally sets the session search_path via pg's startup `options` parameter so
+          // the project's RAW, unqualified migration SQL (CREATE TABLE "x"..., ALTER TABLE "y"...)
+          // resolves to the configured schema — TypeORM's `schema` option alone does NOT set
+          // search_path, so without this raw DDL would land in `public` while the migration ledger
+          // lands in the configured schema.
+          const schema = configService.get<string>('dataDatabase.schema', 'public');
+          const useCustomSearchPath = schema && schema !== 'public';
           return {
             ...baseConfig,
             name: 'data',
             type: 'postgres' as const,
+            schema,
             host: configService.get<string>('dataDatabase.host'),
             port: configService.get<number>('dataDatabase.port'),
             username: configService.get<string>('dataDatabase.username'),
@@ -138,13 +204,27 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
                 }
               : false,
 
-            // Never auto-sync Postgres in production; rely on migrations.
+            // Never auto-sync Postgres in production; rely on migrations. Boot migrations execute
+            // inside createBootDataSource (dataSourceFactory above) under the advisory lock — this
+            // flag states the intent and remains the built-in fallback if that factory is ever
+            // bypassed (the factory constructs the DataSource with migrationsRun:false and calls
+            // runMigrations() itself while holding the lock).
             synchronize: configService.get<boolean>('dataDatabase.synchronize', false),
             migrationsRun: true,
             retryAttempts: 10,
             retryDelay: 3000,
             extra: {
               max: configService.get<number>('dataDatabase.poolSize', 10),
+              // Runtime query/pool timeouts so a stuck query or saturated pool fails fast instead of
+              // hanging requests. statement_timeout bounds live runtime queries; the boot migrations
+              // reset it to 0 per-transaction via SET LOCAL, so a long
+              // CREATE INDEX / backfill at boot is never aborted by it.
+              statement_timeout: configService.get<number>('dataDatabase.statementTimeoutMs', 30000),
+              idleTimeoutMillis: configService.get<number>('dataDatabase.idleTimeoutMs', 30000),
+              connectionTimeoutMillis: configService.get<number>('dataDatabase.connectionTimeoutMs', 10000),
+              // Only set for a non-public schema (see above). `<schema>,public` keeps public on the
+              // path so pg_catalog + any public helpers still resolve; the configured schema wins.
+              ...(useCustomSearchPath ? { options: `-c search_path=${schema},public` } : {}),
             },
           };
         }
@@ -157,7 +237,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
         return {
           ...baseConfig,
           name: 'data',
-          type: 'sqlite' as const,
+          type: 'better-sqlite3' as const,
           database: configService.get<string>('dataDatabase.database', './data/openwa.sqlite'),
           synchronize,
           migrationsRun: !synchronize,
@@ -165,12 +245,14 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
       },
     }),
 
-    // Rate limiting
+    // Rate limiting. When REDIS_ENABLED, the hit-count storage moves to Redis so limits aggregate
+    // across replicas; otherwise the default in-memory (per-process) storage is used. Default off —
+    // a single-node deployment gains nothing from Redis storage, and it adds a connection dep.
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        throttlers: [
+      useFactory: (configService: ConfigService) => {
+        const throttlers = [
           {
             name: 'short',
             ttl: configService.get<number>('api.rateLimit.shortTtl', 1000),
@@ -186,8 +268,16 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
             ttl: configService.get<number>('api.rateLimit.longTtl', 3600000),
             limit: configService.get<number>('api.rateLimit.longLimit', 1000),
           },
-        ],
-      }),
+        ];
+        // Fail-open on Redis error (see RedisThrottlerStorage), so a Redis outage never blocks the
+        // API. The client is built fail-fast (see throttler-redis.client.ts) so that fail-open
+        // engages immediately instead of after a queue/timeout stall per request.
+        const redisStorage =
+          process.env.REDIS_ENABLED === 'true'
+            ? new RedisThrottlerStorage(createThrottlerRedisClient(configService))
+            : undefined;
+        return { throttlers, ...(redisStorage ? { storage: redisStorage } : {}) };
+      },
     }),
 
     // Core modules
@@ -210,15 +300,29 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
     InfraModule,
     ContactModule,
     GroupModule,
+    ProfileModule, // Own-profile API (name / status / picture)
+    CallModule, // Incoming-call API (reject a ringing call)
     LabelModule, // Phase 3: Labels Management
     ChannelModule, // Phase 3: Channels/Newsletter
     StatsModule, // Phase 3: Statistics Dashboard
     MetricsModule, // Prometheus /api/metrics
     StatusModule, // Phase 3: Status/Stories API
+    MediaModule, // Server-side media conversion (opt-in)
+    StatusStoreModule, // Phase 3: inbound status/story TTL store (24h purge + media persistence)
+    ChatMediaModule, // opt-in chat-media archive (retention purge + orphan sweep)
+    AutomationModule, // single-message autoreply rules, evaluated on the inbound dispatch
+    TakeoverModule, // adopts sessions whose holder's lease lapsed (crashed peer / recreated node)
     CatalogModule, // Phase 3: Catalog API (WhatsApp Business)
     PluginsApiModule, // Phase 5: Plugins API
-    ExtensionsModule, // First-party extension plugins (registered disabled)
+    AgentToolsModule, // Agent-invocable tool registry (protocol-neutral)
+    IntegrationModule, // Integration Fabric: @Public provider-webhook ingress + fast-ack pipeline
+    ...searchModules, // Global message search (opt-out via SEARCH_ENABLED=false; default ON)
+    ...mcpModules, // MCP Streamable-HTTP server (opt-in via MCP_ENABLED=true)
     ...serveStaticModules, // Bundled dashboard SPA (production single-port setup)
   ],
+  // Runs after every DataSource has initialized (they initialize eagerly in their provider
+  // factories, and onApplicationBootstrap fires after every onModuleInit), tightening the SQLite
+  // files that better-sqlite3 created with umask permissions back to owner-only.
+  providers: [SqlitePermissionsBoot],
 })
 export class AppModule {}

@@ -1,3 +1,4 @@
+import type { WAMessage } from '@whiskeysockets/baileys';
 import { DataSource, Repository } from 'typeorm';
 import { BaileysStoredMessage } from './baileys-stored-message.entity';
 import { BaileysMessageStoreService } from './baileys-message-store.service';
@@ -28,10 +29,10 @@ describe('BaileysMessageStoreService', () => {
 
   beforeEach(async () => {
     ds = new DataSource({
-      type: 'sqlite',
+      type: 'better-sqlite3',
       database: ':memory:',
       // Session must be present so the @ManyToOne relation metadata resolves and synchronize
-      // can emit the CASCADE FK on the baileys_stored_messages table (I6).
+      // can emit the CASCADE FK on the baileys_stored_messages table.
       entities: [BaileysStoredMessage, Session],
       synchronize: true,
     });
@@ -50,7 +51,30 @@ describe('BaileysMessageStoreService', () => {
     ({
       key: { id, remoteJid: '1@s.whatsapp.net', fromMe: false },
       message: { conversation: id },
+      // A real WAMessage carries binary fields, and they are the only reason the BufferJSON round-trip
+      // exists. With a string-only fixture the assertions below held under any replacer/reviver pair,
+      // including identity — the test named the codec without exercising it.
+      mediaKey: Buffer.from([0x01, 0x02, 0x03, 0xff]),
     }) as unknown as Parameters<BaileysMessageStoreService['put']>[1];
+
+  /** Hold the next upsert until released: the database round trip a reader can land inside. */
+  const holdNextUpsert = (): { release: () => void; fail: (err: Error) => void } => {
+    let release!: () => void;
+    let fail!: (err: Error) => void;
+    const gate = new Promise<void>((resolve, reject) => {
+      release = resolve;
+      fail = reject;
+    });
+    const real = repo.upsert.bind(repo);
+    jest.spyOn(repo, 'upsert').mockImplementationOnce(async (...args: Parameters<typeof real>) => {
+      await gate;
+      return real(...args);
+    });
+    return { release, fail };
+  };
+  const ticks = async (): Promise<void> => {
+    for (let i = 0; i < 20; i++) await new Promise<void>(resolve => setImmediate(resolve));
+  };
 
   it('round-trips a WAMessage through BufferJSON', async () => {
     await seedSession('s1');
@@ -58,6 +82,10 @@ describe('BaileysMessageStoreService', () => {
     const got = await service.getMessage('s1', 'M1');
     expect(got?.key?.id).toBe('M1');
     expect(got?.message?.conversation).toBe('M1');
+    // The assertion that makes this a round-trip test rather than a string-copy test.
+    const mediaKey = (got as unknown as { mediaKey?: unknown }).mediaKey;
+    expect(Buffer.isBuffer(mediaKey)).toBe(true);
+    expect(mediaKey).toEqual(Buffer.from([0x01, 0x02, 0x03, 0xff]));
   });
 
   it('returns null for an unknown id and is session-scoped', async () => {
@@ -75,7 +103,7 @@ describe('BaileysMessageStoreService', () => {
   });
 
   /**
-   * C1 regression test — drives eviction through the REAL put() path so the stored
+   * Regression test — drives eviction through the REAL put() path so the stored
    * createdAt value comes from the upsert payload (millisecond precision), not from
    * SQLite's datetime('now') (second precision). Without the `createdAt: new Date()`
    * fix in put(), the string comparison '…:XX' < '…:XX.000' evaluates TRUE for every
@@ -84,7 +112,7 @@ describe('BaileysMessageStoreService', () => {
    * This test MUST FAIL against the old code (no explicit createdAt in upsert) and
    * PASS with the fix.
    */
-  it('eviction via put() keeps exactly the cap — never wipes the store (C1)', async () => {
+  it('eviction via put() keeps exactly the cap — never wipes the store', async () => {
     process.env.BAILEYS_MESSAGE_STORE_LIMIT = '3';
     await seedSession('s_c1');
     const s = new BaileysMessageStoreService(repo);
@@ -173,6 +201,178 @@ describe('BaileysMessageStoreService', () => {
     await expect(service.put('s1', msg('M1'))).rejects.toThrow('disk full');
   });
 
+  describe('getMessages', () => {
+    it('returns the batch in one query, skipping ids it has never seen', async () => {
+      await seedSession('s1');
+      await service.put('s1', msg('M1'));
+      await service.put('s1', msg('M2'));
+      const found = await service.getMessages('s1', ['M1', 'MISSING', 'M2']);
+      expect(found.map(m => m.key.id).sort()).toEqual(['M1', 'M2']);
+    });
+
+    it('stays scoped to its own session', async () => {
+      await seedSession('s1');
+      await seedSession('s2');
+      await service.put('s2', msg('M1'));
+      expect(await service.getMessages('s1', ['M1'])).toEqual([]);
+    });
+
+    it('short-circuits on an empty or all-falsy id list instead of querying', async () => {
+      // An empty In() clause is a SQL syntax error on some drivers and matches everything on others.
+      const find = jest.spyOn(repo, 'find');
+      expect(await service.getMessages('s1', [])).toEqual([]);
+      expect(await service.getMessages('s1', [''])).toEqual([]);
+      expect(find).not.toHaveBeenCalled();
+    });
+
+    it('round-trips binary fields the same way getMessage does', async () => {
+      await seedSession('s1');
+      await service.put('s1', msg('M1'));
+      const [found] = await service.getMessages('s1', ['M1']);
+      // mediaKey is off the public WAMessage type, like the fixture that wrote it.
+      expect(Buffer.isBuffer((found as unknown as { mediaKey: unknown }).mediaKey)).toBe(true);
+    });
+  });
+
+  describe('a read issued while the write is in flight', () => {
+    beforeEach(() => seedSession('s1'));
+
+    it('getMessage waits for the write', async () => {
+      const held = holdNextUpsert();
+      const write = service.put('s1', msg('M1'));
+      const read = service.getMessage('s1', 'M1');
+      await ticks();
+      held.release();
+      await write;
+      expect((await read)?.key?.id).toBe('M1');
+    });
+
+    it('getMessages waits for the write', async () => {
+      const held = holdNextUpsert();
+      const write = service.put('s1', msg('M1'));
+      const read = service.getMessages('s1', ['M1', 'OTHER']);
+      await ticks();
+      held.release();
+      await write;
+      expect((await read).map(m => m.key.id)).toEqual(['M1']);
+    });
+
+    it('a failed write rejects put and leaves the read to report the message missing', async () => {
+      const held = holdNextUpsert();
+      const write = service.put('s1', msg('M1'));
+      const read = service.getMessage('s1', 'M1');
+      await ticks();
+      held.fail(new Error('disk full'));
+      await expect(write).rejects.toThrow('disk full');
+      expect(await read).toBeNull();
+    });
+
+    it('a write that throws before it starts rejects put and releases the read', async () => {
+      jest.spyOn(service as unknown as { write: () => Promise<void> }, 'write').mockImplementationOnce(() => {
+        throw new Error('no library');
+      });
+      const write = service.put('s1', msg('M1'));
+      const read = service.getMessage('s1', 'M1');
+      await expect(write).rejects.toThrow('no library');
+      expect(await read).toBeNull();
+    }, 1_000);
+
+    it('a read waits for the latest write of an id, not an earlier failed one', async () => {
+      const first = holdNextUpsert();
+      const firstWrite = service.put('s1', msg('M1'));
+      await ticks();
+      const second = holdNextUpsert();
+      const secondWrite = service.put('s1', msg('M1'));
+      first.fail(new Error('disk full'));
+      await expect(firstWrite).rejects.toThrow('disk full');
+      const read = service.getMessage('s1', 'M1');
+      await ticks();
+      second.release();
+      await secondWrite;
+      expect((await read)?.key?.id).toBe('M1');
+    });
+  });
+
+  describe('update', () => {
+    it('rewrites the stored message in place and keeps its eviction age', async () => {
+      await seedSession('s1');
+      await service.put('s1', msg('M1'));
+      const before = await repo.findOneByOrFail({ sessionId: 's1', waMessageId: 'M1' });
+
+      await service.update('s1', 'M1', stored => ({ ...stored, message: { conversation: 'edited' } }));
+
+      expect((await service.getMessage('s1', 'M1'))?.message?.conversation).toBe('edited');
+      const after = await repo.findOneByOrFail({ sessionId: 's1', waMessageId: 'M1' });
+      // An edit is not a new message: refreshing createdAt would push it to the back of the eviction queue.
+      expect(after.createdAt).toEqual(before.createdAt);
+      expect(await repo.count({ where: { sessionId: 's1' } })).toBe(1);
+    });
+
+    it('keeps the binary fields through the rewrite', async () => {
+      await seedSession('s1');
+      await service.put('s1', msg('M1'));
+      await service.update('s1', 'M1', stored => ({ ...stored, message: null }));
+      const got = await service.getMessage('s1', 'M1');
+      expect(got?.message).toBeNull();
+      expect(Buffer.isBuffer((got as unknown as { mediaKey: unknown }).mediaKey)).toBe(true);
+    });
+
+    it('leaves an id the store does not hold absent, and a row the change declines untouched', async () => {
+      await seedSession('s1');
+      await service.put('s1', msg('M1'));
+      const change = jest.fn(() => null);
+
+      await service.update('s1', 'NOPE', change);
+      await service.update('s1', 'M1', change);
+
+      expect(change).toHaveBeenCalledTimes(1); // only for the row that exists
+      expect(await service.getMessage('s1', 'NOPE')).toBeNull();
+      expect((await service.getMessage('s1', 'M1'))?.message?.conversation).toBe('M1');
+    });
+
+    it('applies after a put of the same id that has not finished yet', async () => {
+      await seedSession('s1');
+      // The change is asked for while the original's write is still in flight (its first await is
+      // the library import), which is how the inbound path and a delete for everyone meet.
+      await Promise.all([
+        service.put('s1', msg('M1')),
+        Promise.resolve().then(() => service.update('s1', 'M1', stored => ({ ...stored, message: null }))),
+      ]);
+      expect((await service.getMessage('s1', 'M1'))?.message).toBeNull();
+    });
+
+    it('a read issued while an update is in flight sees the change', async () => {
+      await seedSession('s1');
+      await service.put('s1', msg('M1'));
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => (release = resolve));
+      const real = repo.update.bind(repo);
+      jest.spyOn(repo, 'update').mockImplementationOnce(async (...args: Parameters<typeof real>) => {
+        await gate;
+        return real(...args);
+      });
+
+      const change = service.update('s1', 'M1', stored => ({ ...stored, message: { conversation: 'edited' } }));
+      const read = service.getMessage('s1', 'M1');
+      for (let i = 0; i < 20; i++) await new Promise<void>(resolve => setImmediate(resolve));
+      release();
+      await change;
+
+      expect((await read)?.message?.conversation).toBe('edited');
+    });
+
+    it('an update asked for before the put of the same id settles instead of waiting on it', async () => {
+      await seedSession('s1');
+      const change = jest.fn((stored: WAMessage) => ({ ...stored, message: null }));
+
+      await Promise.all([service.update('s1', 'M1', change), service.put('s1', msg('M1'))]);
+
+      // Queued first, the update found nothing to change; the put that followed it still landed.
+      expect(change).not.toHaveBeenCalled();
+      expect((await service.getMessage('s1', 'M1'))?.message?.conversation).toBe('M1');
+    });
+  });
+
   it('clearSession removes only that session', async () => {
     await seedSession('s1');
     await seedSession('s2');
@@ -181,5 +381,23 @@ describe('BaileysMessageStoreService', () => {
     await service.clearSession('s1');
     expect(await service.getMessage('s1', 'M1')).toBeNull();
     expect(await service.getMessage('s2', 'M2')).not.toBeNull();
+  });
+
+  it('clearSession waits for a write of that session still in flight, so it cannot recreate the row', async () => {
+    await seedSession('s1');
+    await seedSession('s2');
+    await service.put('s2', msg('M2'));
+    const held = holdNextUpsert();
+    const write = service.put('s1', msg('M1'));
+    await ticks();
+
+    const clearing = service.clearSession('s1');
+    await ticks();
+    held.release();
+    await clearing;
+    await write;
+
+    expect(await repo.count({ where: { sessionId: 's1' } })).toBe(0);
+    expect(await repo.count({ where: { sessionId: 's2' } })).toBe(1);
   });
 });

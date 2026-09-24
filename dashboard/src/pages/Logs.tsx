@@ -2,9 +2,14 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, Search, Filter, Loader2, FileText, AlertCircle } from 'lucide-react';
 import type { AuditLog } from '../services/api';
+import { auditApi } from '../services/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useLogsQuery } from '../hooks/queries';
 import { PageHeader } from '../components/PageHeader';
+import { CustomSelect } from '../components/CustomSelect';
+import { pageWindow } from '../utils/pageWindow';
+import { fetchAllPages } from '../utils/fetchAllPages';
+import { escapeCsvCell } from '../utils/csv';
 import './Logs.css';
 
 export function Logs() {
@@ -13,6 +18,7 @@ export function Logs() {
   const [searchQuery, setSearchQuery] = useState('');
   const [severityFilter, setSeverityFilter] = useState('all');
   const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
   const limit = 20;
 
   const severityParam = severityFilter !== 'all' ? severityFilter : undefined;
@@ -28,13 +34,17 @@ export function Logs() {
   });
 
   const totalPages = Math.ceil(total / limit);
+  // Distinguish "filters matched nothing on this page" from "there are no logs at all": the search
+  // box only filters the fetched page (the API has no text search), so a non-match here must not
+  // read as "no such event exists" while more pages may hold it.
+  const hasSearch = searchQuery.trim() !== '';
+  // Severity is enforced SERVER-SIDE (the query carries it): an empty result there means no logs
+  // match at all, which deserves different guidance than the page-local search box.
+  const hasSeverityFilter = severityFilter !== 'all';
 
   const formatTimestamp = (date: string) => new Date(date).toLocaleString();
 
-  // Export the currently loaded (and filtered) logs to a CSV download. Client-side only —
-  // it exports what the page already has, not the whole audit history.
-  const handleExportCsv = () => {
-    if (filteredLogs.length === 0) return;
+  const buildCsv = (rows: AuditLog[]): string => {
     const headers = [
       'timestamp',
       'action',
@@ -47,11 +57,7 @@ export function Logs() {
       'statusCode',
       'errorMessage',
     ];
-    const escape = (value: unknown): string => {
-      const s = value === undefined || value === null ? '' : String(value);
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const rows = filteredLogs.map(log =>
+    const lines = rows.map(log =>
       [
         log.createdAt,
         log.action,
@@ -64,10 +70,13 @@ export function Logs() {
         log.statusCode,
         log.errorMessage,
       ]
-        .map(escape)
+        .map(escapeCsvCell)
         .join(','),
     );
-    const csv = [headers.join(','), ...rows].join('\n');
+    return [headers.join(','), ...lines].join('\n');
+  };
+
+  const download = (csv: string) => {
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -75,6 +84,28 @@ export function Logs() {
     a.download = `openwa-logs-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // Export the WHOLE audit history (honouring the active severity filter + search), not just the
+  // current page — paginate through the API up to a safety cap so a huge table can't OOM the tab. On
+  // a fetch error, fall back to exporting the rows already on screen.
+  const handleExportCsv = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const all = await fetchAllPages<AuditLog>((limit, offset) =>
+        auditApi.list({ severity: severityParam, limit, offset }),
+      );
+      const q = searchQuery.toLowerCase();
+      const rows = q
+        ? all.filter(l => l.action.toLowerCase().includes(q) || (l.errorMessage || '').toLowerCase().includes(q))
+        : all;
+      if (rows.length > 0) download(buildCsv(rows));
+    } catch {
+      if (filteredLogs.length > 0) download(buildCsv(filteredLogs)); // graceful fallback to the page
+    } finally {
+      setExporting(false);
+    }
   };
 
   if (loading && logs.length === 0) {
@@ -94,8 +125,8 @@ export function Logs() {
         title={t('logs.title')}
         subtitle={t('logs.subtitle')}
         actions={
-          <button className="btn-secondary" onClick={handleExportCsv} disabled={filteredLogs.length === 0}>
-            <Download size={18} />
+          <button className="btn-secondary" onClick={() => void handleExportCsv()} disabled={exporting || total === 0}>
+            {exporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
             {t('logs.exportCsv')}
           </button>
         }
@@ -115,24 +146,29 @@ export function Logs() {
             type="text"
             placeholder={t('logs.searchPlaceholder')}
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={e => {
+              setSearchQuery(e.target.value);
+              // A new query invalidates the current page position, like the severity filter below.
+              setPage(1);
+            }}
           />
         </div>
 
         <div className="filter-group">
           <Filter size={16} />
-          <select
+          <CustomSelect
             value={severityFilter}
-            onChange={e => {
-              setSeverityFilter(e.target.value);
+            onChange={value => {
+              setSeverityFilter(value);
               setPage(1);
             }}
-          >
-            <option value="all">{t('logs.severity.all')}</option>
-            <option value="info">{t('logs.severity.info')}</option>
-            <option value="warn">{t('logs.severity.warn')}</option>
-            <option value="error">{t('logs.severity.error')}</option>
-          </select>
+            options={[
+              { value: 'all', label: t('logs.severity.all') },
+              { value: 'info', label: t('logs.severity.info') },
+              { value: 'warn', label: t('logs.severity.warn') },
+              { value: 'error', label: t('logs.severity.error') },
+            ]}
+          />
         </div>
       </div>
 
@@ -149,8 +185,21 @@ export function Logs() {
           {filteredLogs.length === 0 ? (
             <div className="empty-table-state">
               <FileText size={48} strokeWidth={1} />
-              <h3>{t('logs.empty.title')}</h3>
-              <p>{t('logs.empty.description')}</p>
+              {hasSeverityFilter || hasSearch ? (
+                <>
+                  <h3>{t('logs.empty.filteredTitle')}</h3>
+                  <p>
+                    {hasSeverityFilter && !hasSearch
+                      ? t('logs.empty.filteredServerDescription')
+                      : t('logs.empty.filteredDescription')}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h3>{t('logs.empty.title')}</h3>
+                  <p>{t('logs.empty.description')}</p>
+                </>
+              )}
             </div>
           ) : (
             filteredLogs.map(log => (
@@ -175,7 +224,7 @@ export function Logs() {
             {t('common.previous')}
           </button>
           <span className="page-numbers">
-            {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1).map(p => (
+            {pageWindow(page, totalPages).map(p => (
               <button key={p} className={p === page ? 'active' : ''} onClick={() => setPage(p)}>
                 {p}
               </button>

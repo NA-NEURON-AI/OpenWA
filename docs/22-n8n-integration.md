@@ -73,21 +73,39 @@ Start workflows when WhatsApp events occur.
 
 #### Supported Events
 
-| Event                   | Description                         | Use Case                  |
-| ----------------------- | ----------------------------------- | ------------------------- |
-| `message.received`      | New incoming message                | Auto-reply, lead capture  |
-| `message.sent`          | Message sent successfully           | Delivery confirmation     |
-| `message.ack`           | Delivery/read status advanced       | Read receipts             |
-| `message.failed`        | Outgoing message failed             | Failure alerting          |
-| `message.revoked`       | Message deleted for everyone        | Deletion tracking         |
-| `session.status`        | Session status changed              | Lifecycle tracking        |
-| `session.qr`            | QR code generated                   | Reconnection alerts       |
-| `session.authenticated` | Session logged in (phone available) | Startup notifications     |
-| `session.disconnected`  | Session lost connection             | Alert monitoring          |
+| Event                                             | Description                                   | Use Case                                     |
+| ------------------------------------------------- | --------------------------------------------- | -------------------------------------------- |
+| `message.received`                                | New incoming message                          | Auto-reply, lead capture                     |
+| `message.sent`                                    | Message sent successfully                     | Delivery confirmation                        |
+| `message.ack`                                     | Delivery/read status advanced                 | Read receipts                                |
+| `message.failed`                                  | Outgoing message failed                       | Failure alerting                             |
+| `message.revoked`                                 | Message deleted for everyone                  | Deletion tracking                            |
+| `message.reaction`                                | Reaction added / changed / removed            | Reaction tracking                            |
+| `message.edited`                                  | Message body or caption edited                | Content synchronization                      |
+| `status.received`                                 | Contact posted a Status update                | Status archiving                             |
+| `session.status`                                  | Session status changed                        | Lifecycle tracking                           |
+| `session.qr`                                      | QR code generated                             | Reconnection alerts                          |
+| `session.authenticated`                           | Session logged in (phone available)           | Startup notifications                        |
+| `session.disconnected`                            | Session lost connection                       | Alert monitoring                             |
+| `session.reconnect_loop`                          | Every 5th consecutive reconnect attempt       | Stuck-session alerting                       |
+| `session.restriction`                             | WhatsApp restricted the account, or lifted it | Pausing outreach while an account is limited |
+| `presence.update`                                 | A watched chat's online/typing state changed  | Live agent hand-off, presence-aware routing  |
+| `call.accepted` / `call.rejected` / `call.missed` | A ringing call ended — **Baileys only**       | Missed-call follow-up, call logging          |
+| `group.join`                                      | Participant(s) joined a group                 | Welcome messages                             |
+| `group.leave`                                     | Participant(s) left a group                   | Churn tracking                               |
+| `group.update`                                    | Group subject/description/settings changed    | Group administration                         |
+| `group.join_request`                              | Someone asked to join an administered group   | Auto-approve/vet join requests               |
+| `call.received`                                   | Call ringing, not reliable on whatsapp-web.js | Auto-reject + auto-reply bots                |
 
-> **Reserved:** `group.join`, `group.leave`, and `group.update` are accepted by the
-> subscription API but are not emitted yet — don't depend on them until a release notes
-> them as live.
+> [!NOTE]
+> The three call-outcome events fire on Baileys only: whatsapp-web.js has no call-outcome event, so a
+> workflow triggered on `call.missed` never runs on a whatsapp-web.js session. `call.received` fires
+> on both engines but is not reliable on whatsapp-web.js: it fired in a live test on 2026-09-17 and
+> did not in one on 2026-08-10. Rejecting a call, the session's auto-reject setting included, is
+> Baileys only: a rejection sent by whatsapp-web.js did not stop the call from ringing in a live
+> test. Reliable call automation needs a gateway running `ENGINE_TYPE=baileys`. The caller in `from`
+> may be an `@lid` privacy id on either engine; resolve it with
+> `GET /api/sessions/{sessionId}/contacts/{contactId}/phone`.
 
 #### How It Works
 
@@ -117,9 +135,10 @@ Start workflows when WhatsApp events occur.
 
 > **Deduplication.** Every delivery includes `idempotencyKey` and `deliveryId` in the body **and** as the
 > `X-OpenWA-Idempotency-Key` / `X-OpenWA-Delivery-Id` headers. `idempotencyKey` is **stable across retries**
-> of the same event, while `deliveryId` is unique per HTTP attempt. Because a webhook can be retried, add a
-> dedup step keyed on `idempotencyKey` (e.g. an n8n IF or "Remove Duplicates" node) so a retried delivery
-> isn't processed twice.
+> of the same event; `deliveryId` identifies one delivery to one webhook and is stable across that
+> delivery's retry attempts too — read the `X-OpenWA-Retry-Count` header for the attempt number. Because a
+> webhook can be retried, add a dedup step keyed on `idempotencyKey` (e.g. an n8n IF or "Remove Duplicates"
+> node) so a retried delivery isn't processed twice.
 
 ## Example Workflows
 
@@ -253,14 +272,25 @@ Always use the correct format for chat IDs:
 
 ### Trigger Not Receiving Events
 
-1. Check webhook was created in OpenWA dashboard
-2. Verify n8n webhook URL is accessible from OpenWA server
-3. Check firewall/proxy settings
-4. Ensure session is connected and active
+1. **Confirm you registered the production webhook URL, not the test one.** n8n gives every Webhook
+   node two URLs: a test URL (`https://your-n8n/webhook-test/…`) and a production URL
+   (`https://your-n8n/webhook/…`). The test URL is registered only while the editor is listening and
+   stops after a single request, so a workflow wired to it receives one event and then goes silent.
+   Activate the workflow and point OpenWA at the production URL.
+2. Check webhook was created in OpenWA dashboard
+3. Verify n8n webhook URL is accessible from OpenWA server
+4. Check firewall/proxy settings
+5. Ensure session is connected and active
+6. For a call trigger, check the session's engine: the call-outcome events never fire on
+   whatsapp-web.js and `call.received` is not reliable there (see the note under the trigger event
+   table above)
+7. Ask OpenWA which side dropped the event:
+   `GET /api/webhooks/delivery-failures?sessionId={sessionId}` (ADMIN key). A row means OpenWA
+   delivered and n8n rejected it; an empty list means the event never reached delivery at all
 
 ### Message Not Sending
 
-1. Verify session status is "READY"
+1. Verify session status is `ready` (the API returns lowercase status values)
 2. Check chat ID format is correct
 3. Ensure recipient number exists on WhatsApp
 4. Check message content isn't empty
@@ -305,8 +335,9 @@ docker run -it --rm \
 ## Related Documentation
 
 - [OpenWA API Specification](./06-api-specification.md)
-- [Webhook System](./03-system-architecture.md#webhooks)
+- [Webhook System](./03-system-architecture.md#353-webhook-system)
 - [n8n Appointment Booking Workflow](./examples/n8n-appointment-booking.md)
+- [n8n to Discord Workflow](./examples/n8n/README.md), built from n8n's own Webhook and HTTP Request nodes
 - [n8n Documentation](https://docs.n8n.io/)
 
 ---

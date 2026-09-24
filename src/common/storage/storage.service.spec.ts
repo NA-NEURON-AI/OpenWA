@@ -75,6 +75,22 @@ describe('StorageService (local) path traversal protection', () => {
     await expect(service.getFile('../secret.txt')).rejects.toThrow();
   });
 
+  it('deletes a file within the storage root', async () => {
+    await service.putFile('sub/gone.txt', Buffer.from('bye'));
+    await service.deleteFile('sub/gone.txt');
+    expect(fs.existsSync(path.join(localPath, 'sub/gone.txt'))).toBe(false);
+  });
+
+  it('deleting an already-missing file resolves without throwing', async () => {
+    await expect(service.deleteFile('never-existed.txt')).resolves.toBeUndefined();
+  });
+
+  it('rejects deleting a file outside the storage root', async () => {
+    fs.writeFileSync(path.join(baseDir, 'secret.txt'), 'topsecret');
+    await expect(service.deleteFile('../secret.txt')).rejects.toThrow();
+    expect(fs.existsSync(path.join(baseDir, 'secret.txt'))).toBe(true);
+  });
+
   it('imports safe entries but refuses tar entries that escape the storage root', async () => {
     const gz = await makeTarGz([
       { name: 'safe.txt', data: 'good' },
@@ -131,6 +147,58 @@ describe('StorageService put/getFile containment is backend-agnostic', () => {
   });
 });
 
+describe('StorageService.openFile (the export read path)', () => {
+  const readAll = async (stream: Readable): Promise<Buffer> => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    return Buffer.concat(chunks);
+  };
+
+  it('streams a local file with its size, and rejects a missing file before any stream exists', async () => {
+    const { service, baseDir, localPath } = makeLocalService();
+    fs.mkdirSync(path.join(localPath, 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(localPath, 'sub/a.bin'), 'local-bytes');
+
+    const { stream, size } = await service.openFile('sub/a.bin');
+    expect(size).toBe(11);
+    expect((await readAll(stream)).toString()).toBe('local-bytes');
+    expect((await service.getFile('sub/a.bin')).toString()).toBe('local-bytes');
+    await expect(service.openFile('sub/missing.bin')).rejects.toThrow(/ENOENT/);
+    await expect(service.openFile('../../etc/passwd')).rejects.toThrow(/unsafe storage key/);
+
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  });
+});
+
+describe('StorageService getFileCount (S3 size)', () => {
+  it('sums the real Size of each S3 object instead of estimating', async () => {
+    const { service, baseDir } = makeLocalService();
+    const sendMock = jest.fn().mockResolvedValue({
+      Contents: [
+        { Key: 'media/a.jpg', Size: 1000 },
+        { Key: 'media/b.jpg', Size: 2500 },
+      ],
+    });
+    const internal = service as unknown as {
+      storageType: string;
+      s3Client: unknown;
+      s3Bucket: string;
+      s3Available: boolean;
+    };
+    internal.storageType = 's3';
+    internal.s3Client = { send: sendMock };
+    internal.s3Bucket = 'test-bucket';
+    internal.s3Available = true;
+
+    const result = await service.getFileCount();
+
+    expect(result.count).toBe(2);
+    expect(result.sizeBytes).toBe(3500); // real object sizes, not files.length * 100000
+
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  });
+});
+
 describe('StorageService import resource caps (decompression-bomb defense)', () => {
   let baseDir: string;
   let localPath: string;
@@ -179,4 +247,157 @@ describe('StorageService import resource caps (decompression-bomb defense)', () 
     const count = await service.importFromStream(Readable.from(gz));
     expect(count).toBe(1);
   });
+});
+
+describe('StorageService import stream error handling (request fails, process survives)', () => {
+  let baseDir: string;
+  let service: StorageService;
+
+  beforeEach(() => {
+    ({ service, baseDir } = makeLocalService());
+  });
+
+  afterEach(() => {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  });
+
+  it("rejects on a non-gzip input instead of crashing on gunzip's unhandled error event", async () => {
+    // zlib emits 'error' on the gunzip stream for a corrupt/non-gzip payload; pipe() does not forward
+    // it, so without a listener on gunzip this would take down the whole process.
+    const notGzip = Readable.from([Buffer.from('this is definitely not a gzip stream')]);
+    await expect(service.importFromStream(notGzip)).rejects.toThrow();
+  });
+
+  it('rejects when the input stream itself errors mid-read', async () => {
+    const failing = new Readable({
+      read() {
+        this.destroy(new Error('read boom'));
+      },
+    });
+    await expect(service.importFromStream(failing)).rejects.toThrow(/read boom/);
+  });
+});
+
+describe('StorageService local traversal (async + bounded)', () => {
+  let baseDir: string;
+  let service: StorageService;
+
+  beforeEach(() => {
+    ({ service, baseDir } = makeLocalService());
+  });
+
+  afterEach(() => {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+    delete process.env.STORAGE_LIST_MAX_FILES;
+  });
+
+  it('lists files across nested subdirectories (async traversal)', async () => {
+    await service.putFile('a.txt', Buffer.from('a'));
+    await service.putFile('sub/b.txt', Buffer.from('b'));
+    await service.putFile('sub/deep/c.txt', Buffer.from('c'));
+
+    const files = await service.listFiles();
+    expect(files.sort()).toEqual(['a.txt', 'sub/b.txt', 'sub/deep/c.txt']);
+  });
+
+  it('stops at the STORAGE_LIST_MAX_FILES cap instead of enumerating a huge tree', async () => {
+    process.env.STORAGE_LIST_MAX_FILES = '5';
+    for (let i = 0; i < 20; i++) {
+      await service.putFile(`file${i}.txt`, Buffer.from('x'));
+    }
+
+    const files = await service.listFiles();
+    expect(files.length).toBe(5); // capped, not 20
+  });
+
+  it('iterateFiles enumerates the full tree, ignoring the STORAGE_LIST_MAX_FILES per-call cap', async () => {
+    process.env.STORAGE_LIST_MAX_FILES = '5';
+    for (let i = 0; i < 20; i++) {
+      await service.putFile(`file${i}.txt`, Buffer.from('x'));
+    }
+
+    const seen: string[] = [];
+    for await (const file of service.iterateFiles()) seen.push(file);
+    expect(seen.length).toBe(20); // complete where listFiles() above truncates at 5
+  });
+});
+
+/**
+ * The export enumerated with listFiles(), which stops at STORAGE_LIST_MAX_FILES and returns without
+ * logging or throwing — so the documented local→S3 migration (export, repoint STORAGE_TYPE, import)
+ * silently left media behind, and the operator's own files/count pre-check was truncated by the same
+ * path. iterateFiles() exists for exactly this case: its own doc calls the cap "a per-call DoS guard,
+ * not a completeness contract" and tells callers needing the whole store to iterate instead.
+ */
+describe('StorageService.createExportStream enumerates the whole store', () => {
+  it('walks the uncapped iterator rather than the capped listing', async () => {
+    const { service } = makeLocalService();
+    const listFiles = jest.spyOn(service, 'listFiles');
+    const iterateFiles = jest.spyOn(service, 'iterateFiles').mockImplementation(async function* () {
+      yield await Promise.resolve('media/a.bin');
+    });
+    // No read stub: the enumerator runs before the archive is constructed, and `archiver` is mocked
+    // at the top of this file, so the call rejects there and no file is ever opened. Which
+    // enumeration was used is settled by then, and that is the whole claim here.
+    await service.createExportStream().catch(() => undefined);
+
+    expect(iterateFiles).toHaveBeenCalled();
+    expect(listFiles).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The count is the OTHER half of the same fix and had no test of its own — reverting it to the
+   * capped listing left the suite green. It is the pre-check an operator runs before that migration,
+   * so a count truncated at the cap hides precisely the gap they are checking for, and hides it
+   * while agreeing with itself.
+   */
+  it('counts with the uncapped iterator too, so the pre-check cannot hide the gap', async () => {
+    const { service } = makeLocalService();
+    const listFiles = jest.spyOn(service, 'listFiles');
+    const iterateFiles = jest.spyOn(service, 'iterateFiles').mockImplementation(async function* () {
+      yield await Promise.resolve('media/a.bin');
+      yield await Promise.resolve('media/b.bin');
+    });
+
+    const { count } = await service.getFileCount();
+
+    expect(iterateFiles).toHaveBeenCalled();
+    expect(listFiles).not.toHaveBeenCalled();
+    expect(count).toBe(2); // the iterator's items are what was counted, not an unrelated walk
+  });
+
+  /**
+   * Removing the cap from the enumeration also removed the bound on the SIZE loop underneath it,
+   * which stat'ed every file synchronously. On a large store that holds the event loop for the whole
+   * walk: health checks, webhooks and every in-flight request wait behind a count.
+   *
+   * Measured, not asserted structurally. A single "did something run during the call?" flag is NOT
+   * discriminating here — the enumeration awaits before the stat loop begins, so that flag flips
+   * either way. Counting how many times the loop yields WHILE the call is pending does discriminate:
+   * measured at 1 tick for 2000 files with the synchronous loop, and it rises with the file count
+   * once each stat yields.
+   */
+  it('does not hold the event loop for the whole walk', async () => {
+    const { service, localPath } = makeLocalService();
+    fs.mkdirSync(localPath, { recursive: true });
+    const FILES = 2000;
+    for (let i = 0; i < FILES; i++) {
+      fs.writeFileSync(path.join(localPath, `f${i}.bin`), 'x');
+    }
+
+    let ticks = 0;
+    let finished = false;
+    const tick = (): void => {
+      if (finished) return;
+      ticks += 1;
+      setImmediate(tick);
+    };
+    setImmediate(tick);
+
+    const { count } = await service.getFileCount();
+    finished = true;
+
+    expect(count).toBe(FILES); // the walk really did the work being measured
+    expect(ticks).toBeGreaterThan(100);
+  }, 30000);
 });

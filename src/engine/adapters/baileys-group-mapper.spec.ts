@@ -1,21 +1,21 @@
 import type { GroupMetadata } from '@whiskeysockets/baileys';
 import { mapBaileysGroup, mapBaileysGroupInfo } from './baileys-group-mapper';
+const identity = (jid: string): string => jid;
 
-const meta = (over: Partial<GroupMetadata> = {}): GroupMetadata =>
-  ({
-    id: '123-456@g.us',
-    subject: 'My Group',
-    owner: '628999@s.whatsapp.net',
-    desc: 'a description',
-    creation: 1700000000,
-    announce: false,
-    participants: [
-      { id: '628999@s.whatsapp.net', admin: 'superadmin' },
-      { id: '628111@s.whatsapp.net', admin: null },
-      { id: '628222@s.whatsapp.net', admin: 'admin' },
-    ],
-    ...over,
-  }) as GroupMetadata;
+const meta = (over: Partial<GroupMetadata> = {}): GroupMetadata => ({
+  id: '123-456@g.us',
+  subject: 'My Group',
+  owner: '628999@s.whatsapp.net',
+  desc: 'a description',
+  creation: 1700000000,
+  announce: false,
+  participants: [
+    { id: '628999@s.whatsapp.net', admin: 'superadmin' },
+    { id: '628111@s.whatsapp.net', admin: null },
+    { id: '628222@s.whatsapp.net', admin: 'admin' },
+  ],
+  ...over,
+});
 
 describe('mapBaileysGroup', () => {
   it('maps the summary shape and flags self-admin', () => {
@@ -44,6 +44,24 @@ describe('mapBaileysGroup', () => {
 });
 
 describe('mapBaileysGroupInfo', () => {
+  /**
+   * isAnnounce is the group SETTING; isReadOnly is what that setting means for THIS account, which
+   * is the field a client uses to disable its composer. Copying announce into both told an admin of
+   * an announce-only group that they could not post, while whatsapp-web.js reads WA Web's own
+   * per-account flag and says they can.
+   */
+  it('reads isReadOnly against the calling account, not the group setting', () => {
+    const announceOnly = meta({ announce: true });
+    // 628999 is a superadmin and 628222 an admin in the fixture; 628111 is a plain member.
+    expect(mapBaileysGroupInfo(announceOnly, identity, '628999@s.whatsapp.net').isReadOnly).toBe(false);
+    expect(mapBaileysGroupInfo(announceOnly, identity, '628222@s.whatsapp.net').isReadOnly).toBe(false);
+    expect(mapBaileysGroupInfo(announceOnly, identity, '628111@s.whatsapp.net').isReadOnly).toBe(true);
+    // The setting itself is unchanged for every caller.
+    expect(mapBaileysGroupInfo(announceOnly, identity, '628999@s.whatsapp.net').isAnnounce).toBe(true);
+    // An open group is writable for everyone, admin or not.
+    expect(mapBaileysGroupInfo(meta({ announce: false }), identity, '628111@s.whatsapp.net').isReadOnly).toBe(false);
+  });
+
   it('maps full info incl. participants admin/superadmin', () => {
     const info = mapBaileysGroupInfo(meta({ announce: true }));
     expect(info.id).toBe('123-456@g.us');
@@ -58,6 +76,22 @@ describe('mapBaileysGroupInfo', () => {
       { id: '628111@s.whatsapp.net', number: '628111', name: undefined, isAdmin: false, isSuperAdmin: false },
       { id: '628222@s.whatsapp.net', number: '628222', name: undefined, isAdmin: true, isSuperAdmin: false },
     ]);
+  });
+
+  it('maps the group settings fields (announce / restrict→locked / ephemeralDuration→ephemeralSeconds)', () => {
+    const info = mapBaileysGroupInfo(meta({ announce: true, restrict: true, ephemeralDuration: 86400 }));
+    expect(info.announce).toBe(true);
+    expect(info.locked).toBe(true);
+    expect(info.ephemeralSeconds).toBe(86400);
+  });
+
+  it('leaves the settings fields undefined when the metadata does not carry them', () => {
+    const m = meta();
+    delete m.announce;
+    const info = mapBaileysGroupInfo(m);
+    expect(info.announce).toBeUndefined();
+    expect(info.locked).toBeUndefined();
+    expect(info.ephemeralSeconds).toBeUndefined();
   });
 
   it('canonicalizes participant ids and owner through the supplied normalizer (lid -> resolved phone)', () => {

@@ -25,6 +25,7 @@ import {
 import { useTheme } from '../hooks/useTheme';
 import { type UserRole } from '../hooks/useRole';
 import { languageOptions, resolveSupportedLanguage, rtlLanguages, type SupportedLanguage } from '../i18n';
+import { healthApi, infraApi } from '../services/api';
 import './Layout.css';
 
 interface LayoutProps {
@@ -43,14 +44,15 @@ const allNavItems = [
   // Backend /infra/* is ADMIN-only; hide the nav item from non-admins (UX + defense-in-depth).
   { to: '/infrastructure', icon: Server, key: 'infrastructure' as const, adminOnly: true },
   { to: '/plugins', icon: Puzzle, key: 'plugins' as const, adminOnly: true },
-  { to: '/logs', icon: FileText, key: 'logs' as const, adminOnly: false },
+  // Backend /audit is ADMIN-only too.
+  { to: '/logs', icon: FileText, key: 'logs' as const, adminOnly: true },
 ];
 
 const themeIcons = { light: Sun, dark: Moon, system: Monitor };
 
 export function Layout({ onLogout, userRole }: LayoutProps) {
   const { t, i18n } = useTranslation();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, setTheme, resolvedTheme } = useTheme();
   const ThemeIcon = themeIcons[theme];
   const themeLabel = t(`theme.${theme}`);
 
@@ -59,6 +61,12 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  // Show the build-time version immediately, then replace it with the live running version from the
+  // backend so a stale-built bundle can't display the wrong number. Falls back silently on error.
+  const [version, setVersion] = useState(__APP_VERSION__);
+  // A newer published release, shown to admins as a link to its notes. The route is ADMIN-only and
+  // the backend answers quietly when GitHub is unreachable or the check is turned off.
+  const [update, setUpdate] = useState<{ latest: string; url: string } | null>(null);
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const languageMenuRef = useRef<HTMLDivElement>(null);
 
@@ -71,6 +79,39 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    healthApi
+      .check()
+      .then(info => {
+        if (active && info?.version) setVersion(info.version);
+      })
+      .catch(() => {
+        /* keep the build-time fallback */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (userRole !== 'admin') return;
+    let active = true;
+    infraApi
+      .getUpdateCheck()
+      .then(check => {
+        if (active && check.updateAvailable && check.latest && check.releaseUrl) {
+          setUpdate({ latest: check.latest, url: check.releaseUrl });
+        }
+      })
+      .catch(() => {
+        /* no notice */
+      });
+    return () => {
+      active = false;
+    };
+  }, [userRole]);
 
   const handleNavClick = () => {
     if (isMobile) setIsMobileOpen(false);
@@ -139,7 +180,12 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
           {!isCollapsed && (
             <div className="sidebar-brand">
               <span className="brand-name">{t('common.appName')}</span>
-              <span className="brand-subtitle">{t('common.appSubtitle')}</span>
+              <span className="brand-version">v{version}</span>
+              {update && (
+                <a className="brand-update" href={update.url} target="_blank" rel="noopener noreferrer">
+                  {t('common.updateAvailable', { version: update.latest })}
+                </a>
+              )}
             </div>
           )}
         </div>
@@ -151,9 +197,17 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
             title={isCollapsed ? t('common.expand') : t('common.collapse')}
             aria-label={isCollapsed ? t('common.expand') : t('common.collapse')}
           >
-            {isCollapsed
-              ? (isRtl ? <ChevronLeft size={16} /> : <ChevronRight size={16} />)
-              : (isRtl ? <ChevronRight size={16} /> : <ChevronLeft size={16} />)}
+            {isCollapsed ? (
+              isRtl ? (
+                <ChevronLeft size={16} />
+              ) : (
+                <ChevronRight size={16} />
+              )
+            ) : isRtl ? (
+              <ChevronRight size={16} />
+            ) : (
+              <ChevronLeft size={16} />
+            )}
           </button>
         )}
 
@@ -205,14 +259,19 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
               </div>
             )}
           </div>
-          <button
-            className="theme-toggle-btn"
-            onClick={toggleTheme}
-            title={t('theme.label', { value: themeLabel })}
-          >
-            <ThemeIcon size={18} />
-            {!isCollapsed && <span>{themeLabel}</span>}
-          </button>
+          <div className="appearance-menu">
+            <button
+              className="theme-toggle-btn"
+              onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+              title={t('theme.toggleTo', { value: t(resolvedTheme === 'dark' ? 'theme.light' : 'theme.dark') })}
+              aria-label={t('theme.toggleTo', { value: t(resolvedTheme === 'dark' ? 'theme.light' : 'theme.dark') })}
+            >
+              <span className="appearance-button-cue" aria-hidden="true">
+                <ThemeIcon size={16} />
+              </span>
+              {!isCollapsed && <span>{themeLabel}</span>}
+            </button>
+          </div>
           <button className="logout-btn" onClick={onLogout} title={isCollapsed ? t('common.logout') : undefined}>
             <LogOut size={20} />
             {!isCollapsed && <span>{t('common.logout')}</span>}

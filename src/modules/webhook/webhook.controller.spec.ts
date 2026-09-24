@@ -22,6 +22,7 @@ function createSecretWebhook(overrides: Partial<Webhook> = {}): Webhook {
     events: ['message.received'],
     secret: 's3cr3t-hmac-key',
     headers: { Authorization: 'Bearer receiver-token' },
+    filters: null,
     active: true,
     retryCount: 3,
     lastTriggeredAt: null,
@@ -62,7 +63,7 @@ describe('Webhook controllers (secret leak + read authz)', () => {
   it('findOne does not return secret or headers, but keeps safe fields', async () => {
     (service.findOne as jest.Mock).mockResolvedValue(createSecretWebhook());
 
-    const result = await controller.findOne('wh-uuid-1');
+    const result = await controller.findOne('sess-1', 'wh-uuid-1');
 
     expect(result).not.toHaveProperty('secret');
     expect(result).not.toHaveProperty('headers');
@@ -112,7 +113,7 @@ describe('Webhook controllers (secret leak + read authz)', () => {
   it('update response returns no secret/headers', async () => {
     (service.update as jest.Mock).mockResolvedValue(createSecretWebhook({ url: 'https://new.example.com/hook' }));
 
-    const result = await controller.update('wh-uuid-1', { url: 'https://new.example.com/hook' });
+    const result = await controller.update('sess-1', 'wh-uuid-1', { url: 'https://new.example.com/hook' });
 
     expect(result).not.toHaveProperty('secret');
     expect(result).not.toHaveProperty('headers');

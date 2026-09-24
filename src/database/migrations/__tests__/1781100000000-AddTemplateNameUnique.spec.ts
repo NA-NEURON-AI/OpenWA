@@ -1,11 +1,11 @@
-import { DataSource } from 'typeorm';
+import { DataSource, QueryRunner } from 'typeorm';
 import { AddTemplateNameUnique1781100000000 } from '../1781100000000-AddTemplateNameUnique';
 
 describe('AddTemplateNameUnique migration', () => {
   let ds: DataSource;
 
   beforeEach(async () => {
-    ds = new DataSource({ type: 'sqlite', database: ':memory:' });
+    ds = new DataSource({ type: 'better-sqlite3', database: ':memory:' });
     await ds.initialize();
     // Minimal templates table mirroring the AddTemplates sqlite schema.
     await ds.query(
@@ -74,5 +74,23 @@ describe('AddTemplateNameUnique migration', () => {
     const runner = ds.createQueryRunner();
     await expect(new AddTemplateNameUnique1781100000000().up(runner)).resolves.toBeUndefined();
     await runner.release();
+  });
+
+  it('lifts the runtime statement_timeout for the migration transaction on Postgres', async () => {
+    // The runtime data pool's statement_timeout is inherited by the boot-migration connection; this
+    // dedup UPDATE / CREATE UNIQUE INDEX over templates must not be aborted mid-flight.
+    const queries: string[] = [];
+    const pgRunner = {
+      dataSource: { options: { type: 'postgres' } },
+      hasTable: jest.fn().mockResolvedValue(true),
+      query: jest.fn((sql: string) => {
+        queries.push(sql);
+        return Promise.resolve([]);
+      }),
+    } as unknown as QueryRunner;
+
+    await new AddTemplateNameUnique1781100000000().up(pgRunner);
+
+    expect(queries[0]).toBe('SET LOCAL statement_timeout = 0');
   });
 });

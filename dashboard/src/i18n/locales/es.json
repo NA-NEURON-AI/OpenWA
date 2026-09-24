@@ -1,23 +1,23 @@
 {
+  "toast": {
+    "connectionLost": {
+      "title": "Conexión con el servidor perdida",
+      "message": "No se puede acceder al servidor backend. Comprueba si el servidor está en ejecución."
+    }
+  },
   "common": {
     "appName": "OpenWA",
-    "appSubtitle": "API de WhatsApp",
+    "updateAvailable": "v{{version}} disponible",
     "loading": "Cargando...",
-    "save": "Guardar",
     "cancel": "Cancelar",
     "delete": "Eliminar",
-    "edit": "Editar",
     "create": "Crear",
+    "save": "Save",
     "close": "Cerrar",
-    "submit": "Enviar",
-    "confirm": "Confirmar",
     "search": "Buscar",
-    "filter": "Filtrar",
-    "actions": "Acciones",
     "status": "Estado",
     "name": "Nombre",
     "role": "Rol",
-    "type": "Tipo",
     "url": "URL",
     "port": "Puerto",
     "host": "Host",
@@ -25,8 +25,6 @@
     "password": "Contraseña",
     "active": "Activo",
     "inactive": "Inactivo",
-    "enabled": "Habilitado",
-    "disabled": "Deshabilitado",
     "connected": "Conectado",
     "disconnected": "Desconectado",
     "never": "Nunca",
@@ -35,8 +33,6 @@
     "hoursAgo": "Hace {{count}} horas",
     "optional": "opcional",
     "language": "Idioma",
-    "english": "English",
-    "hebrew": "עברית",
     "back": "Atrás",
     "next": "Siguiente",
     "previous": "Anterior",
@@ -47,13 +43,17 @@
     "errorGeneric": "Ha ocurrido un error",
     "unknownError": "Error desconocido",
     "showApiKey": "Mostrar clave API",
-    "hideApiKey": "Ocultar clave API"
+    "hideApiKey": "Ocultar clave API",
+    "retry": "Reintentar"
   },
   "theme": {
     "light": "Claro",
     "dark": "Oscuro",
     "system": "Sistema",
-    "label": "Tema: {{value}}"
+    "label": "Tema: {{value}}",
+    "appearance": "Apariencia",
+    "mode": "Modo",
+    "toggleTo": "Cambiar a {{value}}"
   },
   "nav": {
     "dashboard": "Panel",
@@ -68,6 +68,15 @@
     "templates": "Plantillas"
   },
   "chats": {
+    "media": {
+      "location": "Ubicación",
+      "call": "Llamada",
+      "callMissed": "Llamada perdida",
+      "callVideo": "Videollamada",
+      "callVideoMissed": "Videollamada perdida",
+      "omitted": "Multimedia",
+      "image": "Imagen"
+    },
     "subtitle": "Envía y responde mensajes de WhatsApp en tiempo real",
     "noSessionsTitle": "Sin sesiones conectadas",
     "noSessionsDesc": "Conecta primero una sesión de WhatsApp desde el menú <1>Sesiones</1> para usar el chat.",
@@ -77,7 +86,11 @@
     "loadingChats": "Cargando chats...",
     "empty": "Sin chats",
     "noMessageYet": "Aún sin mensajes",
+    "unreadBadge": "{{count}} mensaje sin leer",
+    "unreadBadge_other": "{{count}} mensajes sin leer",
     "loadingMessages": "Cargando mensajes...",
+    "loadingOlderMessages": "Cargando mensajes anteriores...",
+    "loadOlderMessagesError": "No se pudieron cargar los mensajes anteriores. Desplázate hacia arriba para reintentar.",
     "noMessagesInChat": "Aún no hay mensajes. ¡Envía el primero para empezar!",
     "downloadDocument": "Descargar documento",
     "actions": {
@@ -97,16 +110,70 @@
     "send": "Enviar",
     "placeholderTitle": "Empieza a escribir",
     "placeholderDesc": "Selecciona un chat activo de la barra lateral izquierda para leer y enviar mensajes de WhatsApp.",
+    "scrollToBottom": "Ir al más reciente",
+    "groupSubtitle": "Grupo",
+    "privateContactSubtitle": "Contacto privado",
     "deleteConfirm": "¿Eliminar este mensaje para todos?",
+    "promptButtons": "Opciones del mensaje",
     "messageDeleted": "🚫 Este mensaje fue eliminado",
+    "messageMasked": "🔒 Ocultado por WhatsApp en dispositivos vinculados — revísalo en tu teléfono principal",
+    "kind": {
+      "group": "Grupo",
+      "channel": "Canal",
+      "status": "Estado",
+      "broadcast": "Difusión"
+    },
+    "tab": {
+      "chats": "Chats",
+      "channels": "Canales",
+      "status": "Estado"
+    },
+    "status": {
+      "itemCount": "{{count}} actualización",
+      "itemCount_other": "{{count}} actualizaciones",
+      "empty": "Ningún contacto tiene un estado activo.",
+      "loadError": "No se pudieron cargar los estados.",
+      "mediaUnavailable": "Contenido multimedia no disponible",
+      "compose": "Publicar un estado",
+      "composeText": "Texto",
+      "composeImage": "Imagen",
+      "recipients": "Quién puede ver esto",
+      "recipientsHint": "Baileys requiere una lista de destinatarios; whatsapp-web.js usa tu audiencia de privacidad de estado.",
+      "noContacts": "No se encontraron contactos",
+      "caption": "Leyenda",
+      "backgroundColor": "Color de fondo",
+      "font": "Fuente",
+      "fontDefault": "Predeterminada",
+      "orLabel": "o",
+      "post": "Publicar",
+      "posted": "Estado publicado",
+      "postFailed": "No se pudo publicar el estado",
+      "imageFile": "Imagen de estado"
+    },
+    "channels": {
+      "notSupported": "Los canales no son compatibles con el motor Baileys.",
+      "empty": "Aún no estás suscrito a ningún canal.",
+      "notReady": "La sesión aún no está lista.",
+      "subscribers": "{{count}} suscriptor",
+      "subscribers_other": "{{count}} suscriptores"
+    },
     "errors": {
       "loadSessions": "Error al cargar las sesiones",
       "loadChats": "Error al cargar los chats",
-      "loadMessages": "Error al cargar los mensajes",
       "markRead": "Error al marcar el chat como leído",
       "send": "Error al enviar el mensaje",
       "react": "Error al reaccionar al mensaje",
-      "delete": "Error al eliminar el mensaje"
+      "delete": "Error al eliminar el mensaje",
+      "clickButton": "Error al pulsar el botón",
+      "fileTooLarge": "El archivo es demasiado grande (máx. 18 MB)"
+    },
+    "loadMessagesError": "No se pudieron cargar los mensajes. Revisa los registros del servidor.",
+    "messageStatus": {
+      "pending": "Pendiente",
+      "sent": "Enviado",
+      "delivered": "Entregado",
+      "read": "Leído",
+      "failed": "Fallido"
     }
   },
   "errorBoundary": {
@@ -131,10 +198,11 @@
     "title": "Panel",
     "subtitle": "Resumen de tus sesiones de WhatsApp y actividad",
     "stats": {
-      "activeSessions": "Sesiones activas",
+      "activeSessions": "Sesiones conectadas",
+      "sessionsDetail": "{{running}} en ejecución · {{total}} en total",
       "messagesToday": "Mensajes hoy",
       "webhooksConfigured": "Webhooks configurados",
-      "apiCalls": "Llamadas API (24h)"
+      "totalMessages": "Mensajes totales"
     },
     "sessionsOverview": "Resumen de sesiones",
     "showingSessions": "Mostrando {{shown}} de {{total}} sesiones",
@@ -148,8 +216,26 @@
     "noSessions": "No se encontraron sesiones. Crea una para empezar.",
     "view": "Ver",
     "disconnect": "Desconectar",
+    "disconnectFailed": "No se pudo desconectar la sesión",
     "errorPrefix": "Error: {{message}}",
-    "loadError": "Error al cargar los datos"
+    "loadError": "Error al cargar los datos",
+    "charts": {
+      "title": "Analíticas de mensajes",
+      "period": {
+        "24h": "24 h",
+        "7d": "7 d",
+        "30d": "30 d"
+      },
+      "overTime": "Mensajes a lo largo del tiempo",
+      "overTimeUtcDays": "Mensajes a lo largo del tiempo (días en UTC)",
+      "byType": "Mensajes por tipo",
+      "topChats": "Chats principales",
+      "sent": "Enviados",
+      "received": "Recibidos",
+      "messages": "Mensajes",
+      "empty": "Sin actividad de mensajes en este período.",
+      "error": "No se pudieron cargar las analíticas de mensajes. Revisa los registros del servidor."
+    }
   },
   "sessionStatus": {
     "created": "Nueva",
@@ -158,11 +244,15 @@
     "connecting": "Conectando...",
     "qr_ready": "Escanear QR",
     "ready": "Conectada",
-    "disconnected": "Desconectada"
+    "disconnected": "Desconectada",
+    "action_required": "Acción requerida",
+    "failed": "Fallida",
+    "authenticating": "Autenticando..."
   },
   "sessions": {
     "title": "Sesiones",
     "subtitle": "Gestiona tus sesiones de WhatsApp y conexiones por código QR",
+    "feedDisconnected": "Actualizaciones en vivo desconectadas",
     "newSession": "Nueva sesión",
     "searchPlaceholder": "Buscar sesiones...",
     "filter": {
@@ -205,7 +295,6 @@
       "step3": "<strong>3.</strong> Toca <strong>Vincular dispositivo</strong> y escanea este QR",
       "autoRefresh": "El QR se actualiza automáticamente cada 5 segundos",
       "generating": "Generando código QR...",
-      "unavailable": "El código QR aún no está disponible. Inténtalo en un momento.",
       "preparing": "Preparando código QR...",
       "showQr": "Mostrar QR",
       "loading": "Cargando...",
@@ -219,39 +308,106 @@
       "phone": "Número de teléfono",
       "phoneNone": "No conectado",
       "created": "Creado",
-      "lastActive": "Última actividad"
+      "lastActive": "Última actividad",
+      "autoRejectCalls": "Rechazar llamadas automáticamente",
+      "autoRejectCallsHint": "Las llamadas entrantes se rechazan en cuanto suenan. El webhook call.received se envía igualmente antes. Se aplica a la próxima llamada; no hace falta reiniciar. Solo con el motor Baileys: whatsapp-web.js no puede rechazar llamadas."
+    },
+    "proxy": {
+      "title": "Proxy Configuration",
+      "status": "Current",
+      "enabled": "Use proxy",
+      "url": "Proxy URL",
+      "urlPlaceholder": "http://user:pass@proxy.example.com:8080",
+      "urlKeepPlaceholder": "Enter new URL to replace {{host}} (credentials not shown)",
+      "configured": "{{host}} ({{type}})",
+      "noProxy": "No proxy configured",
+      "hasCredentials": "Credentials are stored but not shown. Enter a full URL to change them.",
+      "hint": "Changes apply on the next session start, not to a running connection. The proxy must be real and reachable — an unreachable value blocks QR delivery and start returns 504.",
+      "createHint": "Only needed when your network cannot reach WhatsApp directly. Must be a real, reachable proxy.",
+      "invalidUrl": "Enter a valid http, https, socks4, or socks5 proxy URL.",
+      "saveSuccessTitle": "Proxy Saved",
+      "saveSuccess": "Proxy settings saved. They apply on the next session start.",
+      "saveError": "Failed to save proxy settings"
     },
     "actions": {
       "view": "Ver",
+      "proxy": "Proxy",
       "start": "Iniciar",
       "stop": "Detener",
       "reconnect": "Reconectar",
+      "unlink": "Desvincular",
       "delete": "Eliminar",
-      "killStuck": "Kill Stuck"
+      "killStuck": "Cerrar bloqueada"
     },
     "toasts": {
       "readyTitle": "Sesión lista",
       "readyDesc": "La sesión de WhatsApp está conectada",
       "disconnectedTitle": "Sesión desconectada",
       "disconnectedDesc": "La sesión de WhatsApp se ha desconectado",
+      "actionRequiredTitle": "Acción requerida",
+      "actionRequiredDesc": "Esta sesión necesita tu atención. Abre la sesión para ver qué hacer.",
       "failedTitle": "Sesión fallida",
-      "failedDesc": "La sesión de WhatsApp no pudo iniciarse. Abre la sesión para ver el motivo."
+      "failedDesc": "La sesión de WhatsApp no pudo iniciarse. Abre la sesión para ver el motivo.",
+      "stopFailedTitle": "Error al detener"
     },
     "card": {
       "phone": "Teléfono",
       "sessionId": "ID de sesión",
       "lastActive": "Última actividad",
-      "error": "Error"
+      "error": "Error",
+      "restriction": "Restricción"
     },
     "forceKill": {
-      "title": "Kill Stuck Session",
-      "message": "Are you sure you want to force-kill session \"{{name}}\"?",
-      "warning": "This will forcefully terminate the WhatsApp browser process. The session may need to be re-scanned on restart.",
-      "confirm": "Kill Session",
-      "successTitle": "Session Killed",
-      "success": "Session has been force-killed. You can restart it now.",
-      "failedTitle": "Force-Kill Failed",
-      "failed": "Failed to force-kill the session."
+      "title": "Cerrar sesión bloqueada",
+      "message": "¿Seguro que quieres forzar el cierre de la sesión \"{{name}}\"?",
+      "warning": "Esto cerrará de forma forzada el proceso del navegador de WhatsApp. Es posible que la sesión deba volver a escanearse al reiniciar.",
+      "confirm": "Cerrar sesión",
+      "successTitle": "Sesión cerrada",
+      "success": "La sesión se cerró de forma forzada. Ya puedes reiniciarla.",
+      "failedTitle": "Error al forzar el cierre",
+      "failed": "No se pudo forzar el cierre de la sesión."
+    },
+    "unlink": {
+      "title": "Desvincular dispositivo",
+      "message": "¿Desvincular la sesión <strong>\"{{name}}\"</strong> de la cuenta de WhatsApp?",
+      "warning": "WhatsApp elimina este dispositivo de los Dispositivos vinculados de la cuenta y la sesión se detiene. Para reconectar se requiere un nuevo código QR o código de emparejamiento. Para borrar también todos los datos locales, elimine la sesión después.",
+      "confirm": "Desvincular",
+      "successTitle": "Dispositivo desvinculado",
+      "success": "Desvinculación completada: se cerró la sesión del dispositivo y se borraron las credenciales locales. Para reconectar se requiere un nuevo código QR o código de emparejamiento.",
+      "failedTitle": "Error al desvincular",
+      "failed": "No se pudo desvincular la sesión.",
+      "incompleteTitle": "Desvinculación incompleta",
+      "incomplete": "La sesión se detuvo localmente, pero la operación de cierre de sesión está incompleta — es posible que el dispositivo siga vinculado. Inicie la sesión y vuelva a intentar la desvinculación."
+    },
+    "pairing": {
+      "tabQr": "Código QR",
+      "tabPhone": "Vincular con número de teléfono",
+      "phoneLabel": "Número de teléfono",
+      "phonePlaceholder": "ej., 919876543210",
+      "phoneHint": "Solo dígitos (sin +, espacios ni guiones) en formato internacional (código de país + número).",
+      "relinkWarning": "En el motor whatsapp-web.js, pedir un código para un número que ya tiene una sesión vinculada puede hacer que WhatsApp desvincule ese dispositivo. Usa la pestaña de código QR si esa sesión debe seguir activa.",
+      "invalidPhone": "Introduce un número de teléfono válido: 6-15 dígitos, primero el código de país, sin símbolos.",
+      "generateButton": "Generar código de vinculación",
+      "generating": "Generando código de vinculación...",
+      "codeLabel": "Tu código de vinculación",
+      "changeNumber": "Cambiar número / Solicitar nuevo código",
+      "instructions": "Instrucciones de vinculación",
+      "step1": "<strong>1.</strong> Abre WhatsApp en tu teléfono",
+      "step2": "<strong>2.</strong> Toca <strong>Menú</strong> o <strong>Ajustes</strong> y selecciona <strong>Dispositivos vinculados</strong>",
+      "step3": "<strong>3.</strong> Toca <strong>Vincular dispositivo</strong> y luego toca <strong>Vincular con número de teléfono</strong>",
+      "step4": "<strong>4.</strong> Introduce en tu teléfono el código de 8 caracteres que se muestra arriba",
+      "waitingConnection": "Esperando a que tu teléfono se vincule…"
+    },
+    "start": {
+      "teardownPendingTitle": "Iniciando sesión",
+      "teardownPending": "El borrado de credenciales de esta sesión aún está en curso. Espere un momento e inténtelo de nuevo.",
+      "errorTitle": "Error al iniciar"
+    },
+    "restriction": {
+      "reachout_timelock": "Chats nuevos bloqueados",
+      "tos_block": "Bloqueado por WhatsApp",
+      "proxy_block": "Conexión bloqueada",
+      "until": "hasta {{date}}"
     }
   },
   "webhooks": {
@@ -267,6 +423,41 @@
     "events": "Eventos",
     "available": "Eventos disponibles",
     "saveChanges": "Guardar cambios",
+    "filters": {
+      "title": "Filtros (opcional)",
+      "hint": "Activar solo cuando se cumplan todas las condiciones. Se aplica a eventos de mensajes.",
+      "badge": "{{count}} filtro",
+      "badge_other": "{{count}} filtros",
+      "addCondition": "Añadir condición",
+      "removeCondition": "Eliminar condición",
+      "caseSensitive": "Distinguir mayúsculas",
+      "contactPlaceholder": "Número o ID de WhatsApp...",
+      "textPlaceholder": "Texto a buscar...",
+      "addValue": "Añadir \"{{value}}\"",
+      "yes": "Sí",
+      "no": "No",
+      "fields": {
+        "sender": "Remitente",
+        "recipient": "Destinatario",
+        "chatId": "ID del chat",
+        "body": "Cuerpo del mensaje",
+        "type": "Tipo de mensaje",
+        "isGroup": "Es chat de grupo",
+        "kind": "Chat kind",
+        "fromMe": "Enviado por mí",
+        "hasMedia": "Tiene multimedia",
+        "mentions": "Menciones"
+      },
+      "operators": {
+        "is": "es",
+        "isNot": "no es",
+        "contains": "contiene",
+        "equals": "es igual a"
+      },
+      "fieldLabel": "Campo de filtro",
+      "operatorLabel": "Operador de filtro",
+      "valueLabel": "Valor de filtro"
+    },
     "columns": {
       "url": "URL",
       "events": "Eventos",
@@ -276,7 +467,10 @@
     },
     "empty": {
       "title": "No hay webhooks configurados",
-      "description": "Añade un webhook para recibir notificaciones de eventos en tiempo real"
+      "description": "Añade un webhook para recibir notificaciones de eventos en tiempo real",
+      "loadErrorTitle": "No se pudieron cargar los webhooks",
+      "forbiddenTitle": "Sin acceso a los webhooks",
+      "forbiddenDesc": "Los webhooks requieren una clave API con el rol de operador o administrador."
     },
     "toasts": {
       "created": "Webhook creado correctamente",
@@ -297,9 +491,27 @@
     "eventDescriptions": {
       "message.received": "Cuando se recibe un mensaje",
       "message.sent": "Cuando se envía un mensaje",
-      "session.connected": "Cuando una sesión se conecta",
-      "session.disconnected": "Cuando una sesión se desconecta",
+      "message.ack": "Cuando cambia el estado de entrega o lectura de un mensaje",
+      "message.failed": "Cuando falla la entrega de un mensaje saliente",
+      "message.revoked": "Cuando se elimina un mensaje para todos",
+      "message.reaction": "Cuando se añade, cambia o quita una reacción",
+      "message.edited": "Cuando se edita un mensaje",
+      "session.status": "Cuando cambia el estado de una sesión",
       "session.qr": "Cuando se genera un código QR",
+      "session.authenticated": "Cuando una sesión se vincula y queda lista",
+      "session.disconnected": "Cuando una sesión se desconecta",
+      "session.reconnect_loop": "Cuando una sesión sigue sin poder reconectarse",
+      "session.restriction": "Cuando WhatsApp restringe la cuenta o levanta una restricción",
+      "presence.update": "Cuando un chat suscrito se conecta, escribe o se desconecta",
+      "group.join": "Cuando participantes se unen a un grupo o son añadidos",
+      "group.leave": "Cuando participantes salen de un grupo o son eliminados",
+      "group.update": "Cuando cambian el nombre, la descripción o los ajustes de un grupo",
+      "group.join_request": "Cuando alguien solicita unirse a un grupo que administra esta sesión",
+      "call.received": "Cuando empieza a sonar una llamada entrante",
+      "call.accepted": "Cuando se contesta una llamada",
+      "call.rejected": "Cuando se rechaza una llamada",
+      "call.missed": "Cuando una llamada no se contesta",
+      "status.received": "Cuando un contacto publica un estado",
       "all": "Todos los eventos"
     }
   },
@@ -328,7 +540,8 @@
       "role": "Rol",
       "status": "Estado",
       "lastUsed": "Último uso",
-      "actions": "Acciones"
+      "actions": "Acciones",
+      "sessions": "Sesiones"
     },
     "statuses": {
       "active": "Activa",
@@ -349,7 +562,19 @@
     "actions": {
       "copy": "Copiar",
       "revoke": "Revocar",
-      "delete": "Eliminar"
+      "delete": "Eliminar",
+      "editSessions": "Editar sesiones"
+    },
+    "sessions": {
+      "label": "Acceso a sesiones",
+      "hint": "Elige las sesiones que podrá usar esta clave.",
+      "all": "Todas las sesiones",
+      "empty": "Todavía no hay sesiones. Esta clave podrá acceder a todas cuando existan.",
+      "restricted": "{{count}} seleccionadas",
+      "editTitle": "Editar acceso a sesiones",
+      "save": "Guardar",
+      "choose": "Elegir sesiones",
+      "leaveAll": "Dejar para todas las sesiones"
     }
   },
   "logs": {
@@ -373,7 +598,10 @@
     },
     "empty": {
       "title": "No se encontraron registros",
-      "description": "Los registros de auditoría aparecerán aquí cuando se realicen acciones"
+      "description": "Los registros de auditoría aparecerán aquí cuando se realicen acciones",
+      "filteredTitle": "Sin coincidencias en esta página",
+      "filteredDescription": "La búsqueda filtra solo la página actual. Bórrala, navega entre páginas o usa el filtro de severidad para acotar en el servidor.",
+      "filteredServerDescription": "Ningún registro coincide con estos filtros. Ajusta el filtro de severidad para ampliar la búsqueda."
     }
   },
   "messageTester": {
@@ -392,6 +620,12 @@
     "loadingGroups": "Cargando grupos...",
     "noGroupsFound": "No se encontraron grupos",
     "selectGroupHint": "Selecciona un grupo de tu WhatsApp",
+    "selectAllGroups": "Seleccionar todos",
+    "selectMatchingGroups": "Seleccionar coincidencias",
+    "clearGroupSelection": "Limpiar",
+    "groupsSelectedCount": "Seleccionados: {{count}}/{{max}}",
+    "noGroupsMatch": "Ningún grupo coincide con tu búsqueda",
+    "forwardUsesFirstGroup": "Reenviar usa solo el primer grupo seleccionado, como chat de origen.",
     "phoneHint": "Usa formato internacional sin espacios",
     "messageType": "Tipo de mensaje",
     "types": {
@@ -399,28 +633,94 @@
       "image": "Imagen",
       "video": "Vídeo",
       "audio": "Audio",
-      "document": "Documento"
+      "document": "Documento",
+      "location": "Ubicación",
+      "contact": "Contacto",
+      "sticker": "Sticker",
+      "poll": "Encuesta",
+      "forward": "Reenviar",
+      "bulk": "Masivo"
     },
     "messageContent": "Contenido del mensaje",
     "messagePlaceholder": "Escribe tu mensaje aquí...",
     "mediaUrl": "URL del medio",
+    "uploadFile": "Subir archivo",
+    "browse": "Examinar",
+    "removeFile": "Quitar archivo",
+    "fileReadError": "Error al leer el archivo",
+    "fileTooLarge": "El archivo es demasiado grande (máx. 18 MB)",
+    "recipientsFileTooLarge": "El archivo de destinatarios es demasiado grande (máx. 2 MB)",
     "caption": "Pie de foto",
     "filename": "Nombre de archivo",
     "captionPlaceholder": "Escribe un pie de foto...",
     "filenamePlaceholder": "documento.pdf",
+    "locationLatitude": "Latitud",
+    "locationLongitude": "Longitud",
+    "locationDescription": "Descripción",
+    "locationAddress": "Dirección",
+    "contactName": "Nombre del contacto",
+    "contactNamePlaceholder": "Jane Doe",
+    "contactNumber": "Número del contacto",
+    "pollQuestion": "Pregunta de la encuesta",
+    "pollQuestionPlaceholder": "¿Dónde nos reunimos?",
+    "pollOptions": "Opciones de la encuesta",
+    "pollOptionPlaceholder": "Opción {{index}}",
+    "pollOptionsHint": "Entre 2 y 12 opciones",
+    "addOption": "Añadir opción",
+    "removeOption": "Quitar opción",
+    "allowMultipleAnswers": "Permitir varias respuestas",
+    "forwardFromChatId": "ID del chat de origen",
+    "forwardFromPlaceholder": "628123456789@c.us",
+    "forwardFromHint": "Déjalo vacío para reenviar desde el destinatario actual",
+    "forwardToChatId": "ID del chat de destino",
+    "forwardToPlaceholder": "Número de teléfono o ID de chat",
+    "forwardMessageId": "ID del mensaje",
+    "forwardMessageIdHint": "ID del mensaje que se va a reenviar",
+    "bulkRecipients": "Destinatarios",
+    "bulkRecipientsUpload": "Subir CSV/TXT",
+    "bulkRecipientsPlaceholder": "+62812345678",
+    "bulkRecipientsHint": "Un número de teléfono o ID de chat por línea (máx. 100)",
+    "bulkRecipientsCount": "Destinatarios: {{count}}",
+    "bulkDelay": "Retraso entre mensajes (ms)",
+    "bulkDelayHint": "1000–60000 ms (predeterminado: 3000)",
+    "bulkMediaKind": "Enviar como",
+    "bulkMediaHint": "Con un adjunto, el mensaje pasa a ser su pie de foto. Un archivo seleccionado viaja dentro de la solicitud, así que los archivos grandes para muchos destinatarios necesitan una URL de medios pública.",
+    "bulkMediaTooLarge": "Este archivo es demasiado grande para enviarlo directamente a {{count}} destinatarios: con esa cantidad, cada archivo puede ocupar como máximo {{size}}. Usa una URL de medios pública o envía a menos destinatarios.",
+    "bulkMediaUrlInvalid": "Usa una dirección completa con http:// o https://, por ejemplo https://example.com/file.pdf.",
+    "bulkCaptionTooLong": "Con un adjunto, el mensaje se envía como su pie de foto, que está limitado a {{max}} caracteres (ahora {{count}}).",
+    "bulkAudioNoCaption": "El audio se envía sin pie, así que este texto no se enviaría. Borra el mensaje o elige otro tipo.",
     "send": "Enviar mensaje",
     "sending": "Enviando...",
+    "sendingProgress": "Enviando {{current}}/{{total}}...",
     "viewOnly": "Solo lectura",
     "responseEmpty": "Envía un mensaje para ver la respuesta de la API",
-    "successLabel": "200 OK - Éxito",
-    "failedLabel": "400 - Fallido",
+    "successLabel": "Éxito",
+    "failedLabel": "Fallido",
+    "groupsSentSummary": "{{sent}}/{{total}} enviados",
+    "groupSendCancelled": "{{count}}, cancelados",
+    "groupSendStopped": "{{count}}, detenido tras HTTP {{status}}",
     "response": {
       "timestamp": "Fecha/Hora",
       "messageId": "ID de mensaje",
-      "error": "Error"
+      "batchId": "ID del lote",
+      "error": "Error",
+      "groups": "Grupos",
+      "notSent": "No enviados"
     },
     "sendFailed": "Error al enviar el mensaje",
-    "notOnWhatsApp": "Este número no está registrado en WhatsApp"
+    "notOnWhatsApp": "Este número no está registrado en WhatsApp",
+    "batch": {
+      "status": {
+        "pending": "Pendiente",
+        "processing": "Procesando",
+        "completed": "Completado",
+        "cancelled": "Cancelado",
+        "failed": "Fallido"
+      },
+      "progress": "Enviados {{sent}} de {{total}} · {{failed}} fallidos · {{pending}} pendientes",
+      "cancel": "Cancelar lote",
+      "cancelling": "Cancelando..."
+    }
   },
   "templates": {
     "title": "Plantillas",
@@ -443,7 +743,7 @@
     "previewTitle": "Vista previa",
     "previewValuePlaceholder": "Valor de ejemplo",
     "previewEmpty": "Empieza a escribir una plantilla para previsualizarla aquí.",
-    "noPlaceholders": "Usa marcadores {{nombre}} para probar sustituciones.",
+    "noPlaceholders": "Usa marcadores {{name}} para probar sustituciones.",
     "savedTitle": "Plantillas guardadas",
     "count": "{{count}} en total",
     "deleteTitle": "Eliminar plantilla",
@@ -455,7 +755,10 @@
       "title": "No hay plantillas guardadas",
       "description": "Crea una plantilla reutilizable para agilizar respuestas y notificaciones habituales.",
       "noSessionsTitle": "No hay sesiones disponibles",
-      "noSessionsDesc": "Crea una sesión de WhatsApp antes de añadir plantillas."
+      "noSessionsDesc": "Crea una sesión de WhatsApp antes de añadir plantillas.",
+      "loadErrorTitle": "No se pudieron cargar las plantillas",
+      "forbiddenTitle": "Sin acceso a las plantillas",
+      "forbiddenDesc": "Las plantillas requieren una clave API con el rol de operador o administrador."
     },
     "toasts": {
       "created": "Plantilla creada correctamente",
@@ -465,36 +768,14 @@
       "deleted": "Plantilla eliminada correctamente",
       "deleteFailed": "Error al eliminar la plantilla: {{message}}",
       "copied": "Nombre de plantilla copiado"
-    }
+    },
+    "sessionSelect": "Sesión"
   },
   "infrastructure": {
     "title": "Infraestructura",
     "subtitle": "Configura el servidor, base de datos, caché, almacenamiento y motor",
     "saveConfig": "Guardar configuración",
     "saving": "Guardando...",
-    "server": {
-      "title": "Configuración del servidor",
-      "production": "Producción",
-      "development": "Desarrollo",
-      "environment": "Entorno",
-      "domain": "Dominio",
-      "apiPort": "Puerto API",
-      "dashboardPort": "Puerto del panel",
-      "corsOrigins": "Orígenes CORS",
-      "corsPlaceholder": "* o varios orígenes separados por comas",
-      "publicApiUrl": "URL pública de la API (opcional)",
-      "publicDashboardUrl": "URL pública del panel (opcional)"
-    },
-    "webhook": {
-      "title": "Webhook y límite de velocidad",
-      "settings": "Configuración de webhook",
-      "timeout": "Tiempo de espera (ms)",
-      "maxRetries": "Máximo de reintentos",
-      "retryDelay": "Retardo entre reintentos (ms)",
-      "rateLimit": "Límite de velocidad",
-      "window": "Ventana de tiempo (segundos)",
-      "maxReq": "Máximo de peticiones por ventana"
-    },
     "database": {
       "title": "Configuración de la base de datos",
       "sqlite": "SQLite",
@@ -504,6 +785,8 @@
       "useBuiltIn": "Usar contenedor PostgreSQL integrado",
       "builtInDesc": "OpenWA gestionará un contenedor PostgreSQL por ti",
       "dbName": "Nombre de la base de datos",
+      "schema": "Esquema",
+      "schemaDesc": "Esquema de PostgreSQL (ignorado para SQLite). Predeterminado 'public'. El esquema debe existir previamente.",
       "poolSize": "Tamaño del pool",
       "ssl": "Conexión SSL",
       "sslDesc": "Habilitar TLS/SSL para conexiones seguras a la base de datos",
@@ -512,6 +795,23 @@
       "migrationsTitle": "Migraciones de la base de datos",
       "migrationsStatus": "El esquema se sincroniza automáticamente con TypeORM",
       "migrationsHint": "Las migraciones se gestionan automáticamente. Usa la CLI para migraciones manuales."
+    },
+    "engine": {
+      "title": "Motor de WhatsApp",
+      "builtIn": "Integrado",
+      "headless": "Modo headless",
+      "headlessDesc": "Ejecuta el navegador sin interfaz visible (recomendado para producción).",
+      "sessionDataPath": "Ruta de datos de sesión",
+      "browserArgs": "Argumentos del navegador",
+      "noBrowser": "Este motor se conecta por WebSocket: no tiene navegador, por lo que no hay ajustes de modo headless ni de argumentos del navegador. El motor activo se aplica tras reiniciar.",
+      "restartNote": "Cambiar el motor surte efecto tras reiniciar el servidor.",
+      "webVersion": "Compilación de WhatsApp Web",
+      "webVersionNative": "automático (predeterminado de whatsapp-web.js)",
+      "webVersionSource": {
+        "pinned": "fijado mediante WWEBJS_WEB_VERSION",
+        "auto": "resuelto automáticamente, compilación estable conocida actual",
+        "native": "selección automática nativa de whatsapp-web.js"
+      }
     },
     "redis": {
       "title": "Redis",
@@ -522,16 +822,16 @@
       "queueTitle": "Habilitar sistema de colas BullMQ",
       "queueDesc": "Usa colas de mensajes para entrega fiable de mensajes y webhooks",
       "statsTitle": "Estadísticas de colas",
-      "messageQueue": "Cola de mensajes",
       "webhookQueue": "Cola de webhooks",
       "pending": "Pendiente",
       "completed": "Completado",
       "failed": "Fallido",
-      "clearFailed": "Limpiar trabajos fallidos",
       "viewBullMq": "Ver panel BullMQ",
       "disabledTitle": "Redis está deshabilitado",
       "disabledDesc": "Habilita Redis para caché, almacenamiento de sesiones y colas de mensajes BullMQ.",
-      "passwordOptional": "(opcional)"
+      "passwordOptional": "(opcional)",
+      "bullMqUrlCopied": "URL del panel de Bull MQ copiada",
+      "bullMqUrlHint": "Ábrelo con una clave de API ADMIN: una pestaña del navegador no puede autenticarse."
     },
     "storage": {
       "title": "Configuración de almacenamiento",
@@ -547,7 +847,8 @@
       "accessKey": "Clave de acceso",
       "secretKey": "Clave secreta",
       "endpoint": "Endpoint personalizado (opcional)",
-      "endpointHint": "Para MinIO u otros servicios compatibles con S3"
+      "endpointHint": "Para MinIO u otros servicios compatibles con S3",
+      "s3Unreachable": "S3 (inaccesible)"
     },
     "statusLabels": {
       "connected": "Conectado",
@@ -572,38 +873,85 @@
     },
     "toasts": {
       "saveFailed": "Error al guardar"
-    }
+    },
+    "envPinNote": "Fijado por la variable de entorno {{name}}: este es el valor en ejecución; los cambios del panel no se aplicarán hasta que esa variable se elimine.",
+    "pendingRestartNote": "Guardado, pero aún no aplicado: reinicia el servidor para que este cambio surta efecto.",
+    "migration": {
+      "title": "Atención: esto cambia el backend de datos",
+      "dbWarning": "La nueva base de datos comienza vacía. Descarga ahora una copia de seguridad de tus datos actuales (mientras sigues en la base de datos anterior) y luego restáurala después del reinicio.",
+      "storageWarning": "Los archivos multimedia existentes no se trasladan automáticamente al nuevo backend de almacenamiento; permanecerán en la ubicación anterior.",
+      "downloadBackup": "Descargar copia de seguridad primero",
+      "backupTitle": "Copia de seguridad y restauración de datos",
+      "backupHint": "Exporta todos los datos como JSON antes de cambiar de base de datos y luego impórtalos tras el cambio. La copia de seguridad contiene secretos de webhook y credenciales de proxy en texto plano: guárdala de forma segura y elimínala después de restaurarla.",
+      "export": "Exportar datos",
+      "import": "Importar datos",
+      "exportFailed": "No se pudieron exportar los datos",
+      "exportPartialTitle": "Backup is missing some media",
+      "exportPartial": "{{count}} attachment payload(s) exceeded the export media budget and were saved as placeholders. The messages restore; their media does not.",
+      "importFailed": "No se pudieron importar los datos",
+      "importOk": "Datos importados",
+      "importConfirm": "La importación REEMPLAZARÁ todos los datos actuales con la copia de seguridad ({{rows}} filas). Esto no se puede deshacer. ¿Continuar?",
+      "invalidFile": "Ese archivo no es una copia de seguridad de datos válida de OpenWA.",
+      "importTooLarge": "La copia de seguridad supera el límite de la solicitud. Aumenta BODY_SIZE_LIMIT en el servidor e inténtalo de nuevo."
+    },
+    "statusLoadError": "No se pudo cargar el estado actual de la infraestructura. Actualiza para reintentar."
   },
   "plugins": {
     "title": "Plugins",
-    "subtitle": "Gestiona motores, backends de almacenamiento y extensiones",
+    "subtitle": "Instala, configura y gestiona extensiones",
     "refresh": "Actualizar",
-    "engineCard": "Motor de WhatsApp activo",
-    "running": "En ejecución",
-    "supportedFeatures": "Funciones compatibles:",
     "builtIn": "Integrado",
     "noDescription": "Sin descripción disponible",
-    "required": "Obligatorio",
-    "active": "Activo",
-    "activate": "Activar",
+    "statuses": {
+      "installed": "Instalado",
+      "enabled": "Habilitado",
+      "disabled": "Deshabilitado",
+      "error": "Error"
+    },
+    "types": {
+      "engine": "Motor",
+      "storage": "Almacenamiento",
+      "queue": "Cola",
+      "auth": "Autenticación",
+      "extension": "Extensión"
+    },
     "enable": "Habilitar",
     "disable": "Deshabilitar",
     "healthCheck": "Comprobación de salud",
     "configure": "Configurar",
+    "install": "Instalar plugin",
+    "uninstall": "Desinstalar",
+    "uninstallConfirm": "¿Desinstalar \"{{name}}\"? Esto elimina sus archivos.",
     "empty": {
       "title": "No se encontraron plugins",
       "description": "Instala plugins para ampliar la funcionalidad de OpenWA"
     },
     "config": {
       "title": "Configurar {{name}}",
-      "restartNotice": "Los cambios requieren reiniciar el servidor para aplicarse",
-      "engineType": "Tipo de motor",
-      "headless": "Modo sin cabeza",
-      "headlessDesc": "Ejecutar el navegador sin interfaz visible (recomendado para producción)",
-      "sessionDataPath": "Ruta de datos de sesión",
-      "browserArgs": "Argumentos del navegador",
       "noOptions": "No hay opciones de configuración disponibles para este plugin",
-      "save": "Guardar configuración"
+      "uiHandshakeError": "La interfaz de configuración del plugin no se inició. Usa el formulario inferior si está disponible.",
+      "save": "Guardar configuración",
+      "addItem": "Añadir",
+      "tabConfig": "Configuración",
+      "tabSessions": "Sesiones"
+    },
+    "rail": {
+      "enabled": "habilitado",
+      "installed": "instalado",
+      "active": "Plugins activos",
+      "none": "Ninguno habilitado todavía"
+    },
+    "installModal": {
+      "title": "Instalar un plugin",
+      "hint": "Sube un plugin empaquetado como un .zip (con un manifest.json). Se ejecuta en modo aislado una vez habilitado.",
+      "trustWarning": "Los plugins se ejecutan con todos los privilegios del proceso de la puerta de enlace: el modo aislado contiene fallos, no código malicioso. Instala solo plugins en los que confíes.",
+      "choose": "Elige un archivo .zip…",
+      "tooLarge": "El archivo supera el límite de 5 MB.",
+      "catalogHint": "Instala directamente desde el catálogo de plugins de OpenWA. El .zip se obtiene en el servidor a través de la protección SSRF, luego se valida y se ejecuta en sandbox.",
+      "catalogTeaser": "¿Buscas plugins?",
+      "catalogTeaserSuffix": "explora el marketplace oficial.",
+      "tabCatalog": "Catálogo",
+      "tabUpload": "Subir .zip"
     },
     "toasts": {
       "errorTitle": "Error de plugin",
@@ -613,7 +961,117 @@
       "healthError": "Error en la comprobación de salud",
       "savedTitle": "Configuración guardada",
       "savedDesc": "Es necesario reiniciar el servidor para aplicar los cambios.",
-      "saveFailed": "Error al guardar"
+      "saveFailed": "Error al guardar",
+      "installed": "Plugin instalado",
+      "installFailed": "Error en la instalación",
+      "uninstalled": "Plugin desinstalado",
+      "uninstallFailed": "Error al desinstalar",
+      "enableFailedTitle": "Error al activar",
+      "disableFailedTitle": "Error al desactivar",
+      "configRequiredTitle": "Configuración requerida",
+      "configRequiredDesc": "Completa los campos obligatorios antes de activar: {{fields}}",
+      "updateFailed": "Error al actualizar"
+    },
+    "sessions": {
+      "activationTitle": "Ejecutar para",
+      "activationDesc": "Elige para qué sesiones se ejecuta este complemento.",
+      "allSessions": "Todas las sesiones",
+      "specificSessions": "Sesiones específicas",
+      "noSessions": "Aún no hay sesiones.",
+      "saveActivation": "Guardar activación",
+      "perSessionTitle": "Configuración por sesión",
+      "perSessionDesc": "Anula la configuración global para una sesión; los campos sin modificar heredan el valor global.",
+      "selectSession": "Selecciona una sesión…",
+      "saveOverride": "Guardar anulación",
+      "clearOverride": "Borrar anulación"
+    },
+    "instances": {
+      "title": "Instancias",
+      "description": "Aprovisiona instancias por cuenta para esta integración. Cada instancia tiene su propio secreto de firma y URL de entrada.",
+      "create": "Crear instancia",
+      "save": "Save",
+      "empty": "Aún no hay instancias. Crea una para obtener una URL de entrada y un secreto.",
+      "loadError": "Error al cargar las instancias.",
+      "allSessions": "Todas las sesiones",
+      "enabled": "Habilitada",
+      "disabled": "Deshabilitada",
+      "form": {
+        "instanceId": "ID de instancia",
+        "instanceIdPlaceholder": "p. ej. acme-support",
+        "instanceIdHint": "Letras, números, guiones y guiones bajos (máx. 64).",
+        "sessionScope": "Ámbito de sesión (opcional)",
+        "sessionScopePlaceholder": "Déjalo en blanco para todas las sesiones",
+        "verifyToken": "Token de verificación (opcional)",
+        "verifyTokenPlaceholder": "Token que el proveedor devuelve al verificar",
+        "secret": "Secreto de ingress (opcional)",
+        "secretPlaceholder": "Secreto del webhook del proveedor (p. ej. Chatwoot)",
+        "secretHint": "Déjalo en blanco para generarlo automáticamente (se muestra una sola vez). Si el proveedor fija su propio secreto de webhook, pégalo aquí: uno autogenerado no coincidirá.",
+        "config": "Configuración (JSON opcional)",
+        "configPlaceholder": "{ }"
+      },
+      "created": {
+        "title": "Instancia creada",
+        "hint": "Copia el secreto ahora — solo se muestra una vez.",
+        "secret": "Secreto de firma",
+        "ingressUrls": "URL(s) de entrada"
+      },
+      "regenerate": {
+        "title": "Regenerar secreto",
+        "confirm": "¿Regenerar el secreto de firma de {{id}}? El secreto actual dejará de funcionar de inmediato.",
+        "action": "Regenerar"
+      },
+      "edit": {
+        "title": "Editar {{id}}"
+      },
+      "delete": {
+        "title": "Eliminar instancia",
+        "confirm": "¿Eliminar la instancia {{id}}? Su URL de entrada y secreto dejarán de funcionar de inmediato.",
+        "action": "Eliminar"
+      },
+      "actions": {
+        "regenerate": "Regenerar secreto",
+        "edit": "Editar",
+        "delete": "Eliminar",
+        "copy": "Copiar",
+        "save": "Guardar",
+        "enable": "Habilitar",
+        "disable": "Deshabilitar"
+      },
+      "errors": {
+        "invalidId": "El ID de instancia debe contener letras, números, guiones o guiones bajos (máx. 64).",
+        "invalidJson": "La configuración debe ser JSON válido.",
+        "invalidSecret": "El secreto debe tener al menos 16 caracteres, o déjalo en blanco para generarlo automáticamente.",
+        "duplicateId": "Ya existe una instancia con ese ID."
+      },
+      "toasts": {
+        "created": "Instancia creada",
+        "updated": "Instancia actualizada",
+        "deleted": "Instancia eliminada",
+        "secretRegenerated": "Secreto regenerado",
+        "actionFailed": "La acción falló"
+      }
+    },
+    "catalog": {
+      "empty": "No hay plugins en el catálogo.",
+      "install": "Instalar",
+      "installed": "Instalado",
+      "noDownload": "Esta entrada del catálogo no tiene URL de descarga.",
+      "noMatch": "Ningún plugin coincide con tu búsqueda.",
+      "searchPlaceholder": "Buscar plugins…",
+      "update": "Actualizar",
+      "updateAvailable": "Actualización disponible",
+      "updated": "Plugin actualizado"
     }
+  },
+  "search": {
+    "placeholder": "Buscar mensajes…",
+    "results": "{{count}} resultados",
+    "empty": "No se encontraron mensajes.",
+    "error": "Error en la búsqueda. Inténtalo de nuevo.",
+    "unavailable": "La búsqueda no está configurada.",
+    "scope": {
+      "current": "Esta sesión"
+    },
+    "loading": "Buscando…"
   }
 }

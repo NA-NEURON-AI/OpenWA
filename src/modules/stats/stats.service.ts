@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { Session, SessionStatus } from '../session/entities/session.entity';
 import { Message, MessageStatus } from '../message/entities/message.entity';
@@ -28,6 +29,19 @@ export function hourBucketSql(dbType: string): string {
     : `CAST(strftime('%H', m.createdAt) AS INTEGER)`;
 }
 
+/**
+ * SQL for the most-recent-activity timestamp (MAX of createdAt) as an identical text format on both
+ * engines. SQLite's MAX over a `datetime` column returns the stored text; Postgres returns a timestamp
+ * the driver hydrates to a JS Date (serialized to a different ISO string). to_char/strftime pin both
+ * to `YYYY-MM-DD HH:MM:SS`, matching the format the time-series buckets already use, so the lastActive
+ * field is stable regardless of the backing database.
+ */
+export function maxCreatedAtSql(dbType: string): string {
+  return dbType === 'postgres'
+    ? `to_char(MAX(m."createdAt"), 'YYYY-MM-DD HH24:MI:SS')`
+    : `strftime('%Y-%m-%d %H:%M:%S', MAX(m.createdAt))`;
+}
+
 export interface OverviewStats {
   sessions: {
     active: number;
@@ -52,32 +66,66 @@ export interface MessageStats {
   timeSeries: TimeSeriesPoint[];
   byType: Record<string, number>;
   bySession: Array<{ sessionId: string; name: string; sent: number; received: number }>;
-  topChats: Array<{ chatId: string; messageCount: number }>;
+  topChats: Array<{ chatId: string; chatName: string | null; messageCount: number }>;
 }
 
 export interface SessionStats {
   session: { id: string; name: string; status: string };
   messages: { sent: number; received: number; today: number; failed: number };
-  topChats: Array<{ chatId: string; count: number; lastActive: string }>;
+  topChats: Array<{ chatId: string; chatName: string | null; count: number; lastActive: string }>;
   hourlyActivity: Array<{ hour: number; sent: number; received: number }>;
 }
 
 @Injectable()
 export class StatsService {
+  /**
+   * In-process TTL memo for the aggregate responses, keyed by query shape ('overview',
+   * 'messages:<period>', 'session:<id>'). The aggregates run GROUP BY scans over the whole
+   * messages table — on the default SQLite backend synchronously on the event loop — so
+   * dashboard polling would otherwise re-run them on every request. TTL-only invalidation:
+   * entries expire after stats.cacheTtlMs; there is no write-path hook. Session-scoped entries
+   * are additionally re-validated on serve (getSessionStats), so a deleted session is not
+   * resurrected from the memo. Key cardinality is
+   * bounded (4 global shapes + one per session), so no size eviction is needed.
+   */
+  private readonly memo = new Map<string, { expiresAt: number; value: unknown }>();
+
   constructor(
     @InjectRepository(Session, 'data')
     private readonly sessionRepo: Repository<Session>,
     @InjectRepository(Message, 'data')
     private readonly messageRepo: Repository<Message>,
     private readonly cacheService: CacheService,
+    private readonly configService: ConfigService,
   ) {}
 
   /** The data-connection dialect ('sqlite' | 'postgres'), used to pick portable date SQL. */
   private get dataDbType(): string {
-    return this.messageRepo.manager.connection.options.type;
+    return this.messageRepo.manager.dataSource.options.type;
+  }
+
+  /** Memo TTL in ms; 0 disables memoization (every request hits the DB). Read per call. */
+  private get memoTtlMs(): number {
+    return this.configService.get<number>('stats.cacheTtlMs', 30000);
+  }
+
+  /** Returns the memoized value for `key` while fresh; otherwise computes, stores, returns it. */
+  private async memoized<T>(key: string, compute: () => Promise<T>): Promise<T> {
+    const ttl = this.memoTtlMs;
+    if (ttl <= 0) return compute();
+    const now = Date.now();
+    const hit = this.memo.get(key);
+    if (hit && hit.expiresAt > now) return hit.value as T;
+    const value = await compute();
+    this.memo.set(key, { expiresAt: now + ttl, value });
+    return value;
   }
 
   async getOverview(): Promise<OverviewStats> {
+    return this.memoized('overview', () => this.loadOverview());
+  }
+
+  private async loadOverview(): Promise<OverviewStats> {
     // Get session stats
     const sessions = await this.sessionRepo.find();
     const byStatus: Record<string, number> = {};
@@ -140,18 +188,26 @@ export class StatsService {
   }
 
   async getMessageStats(period: '24h' | '7d' | '30d'): Promise<MessageStats> {
+    return this.memoized(`messages:${period}`, () => this.loadMessageStats(period));
+  }
+
+  private async loadMessageStats(period: '24h' | '7d' | '30d'): Promise<MessageStats> {
     const since = this.getPeriodStart(period);
     const interval = period === '24h' ? 'hour' : 'day';
 
     // Time series - using raw query for SQLite compatibility
     const timeSeries = await this.getTimeSeries(since, interval);
 
-    // By type
+    // By type. Rows with no body AND no metadata are content-less system/event rows (e.g. @lid
+    // privacy-user events the engine maps to `unknown`) — counting them would put a misleading
+    // "unknown" slice in the by-type chart, so they're excluded from the aggregation.
     const byTypeRaw = await this.messageRepo
       .createQueryBuilder('m')
       .select('m.type', 'type')
       .addSelect('COUNT(*)', 'count')
       .where('m.createdAt >= :since', { since })
+      // Parenthesized: TypeORM does not wrap an andWhere, so a bare OR would escape the period bound.
+      .andWhere("((m.body IS NOT NULL AND m.body != '') OR m.metadata IS NOT NULL)")
       .groupBy('m.type')
       .getRawMany<{ type: string; count: string }>();
 
@@ -195,11 +251,14 @@ export class StatsService {
       .createQueryBuilder('m')
       .select('m.chatId', 'chatId')
       .addSelect('COUNT(*)', 'messageCount')
+      .addSelect('MAX(m.chatName)', 'chatName')
       .where('m.createdAt >= :since', { since })
       .groupBy('m.chatId')
-      .orderBy('messageCount', 'DESC')
+      // Order by the aggregate expression, not the "messageCount" alias: Postgres folds an unquoted
+      // ORDER BY messageCount to lowercase and 42703s against the quoted alias (SQLite tolerated it).
+      .orderBy('COUNT(*)', 'DESC')
       .limit(10)
-      .getRawMany<{ chatId: string; messageCount: string }>();
+      .getRawMany<{ chatId: string; messageCount: string; chatName: string | null }>();
 
     return {
       timeSeries,
@@ -207,12 +266,26 @@ export class StatsService {
       bySession,
       topChats: topChats.map(c => ({
         chatId: c.chatId,
+        chatName: c.chatName ?? null,
         messageCount: parseInt(c.messageCount),
       })),
     };
   }
 
   async getSessionStats(sessionId: string): Promise<SessionStats> {
+    // The memo has no write-path hook, so a `session:<id>` entry can outlive its session row and
+    // would keep serving a deleted session's stats until the TTL expires. Re-check existence on
+    // every call — a cheap primary-key lookup next to the aggregate scans the memo exists to
+    // avoid — and drop the stale entry instead of serving it.
+    const key = `session:${sessionId}`;
+    if ((await this.sessionRepo.count({ where: { id: sessionId } })) === 0) {
+      this.memo.delete(key);
+      throw new NotFoundException('Session not found');
+    }
+    return this.memoized(key, () => this.loadSessionStats(sessionId));
+  }
+
+  private async loadSessionStats(sessionId: string): Promise<SessionStats> {
     const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
     if (!session) {
       throw new NotFoundException('Session not found');
@@ -249,12 +322,13 @@ export class StatsService {
       .createQueryBuilder('m')
       .select('m.chatId', 'chatId')
       .addSelect('COUNT(*)', 'count')
-      .addSelect('MAX(m.createdAt)', 'lastActive')
+      .addSelect(maxCreatedAtSql(this.dataDbType), 'lastActive')
+      .addSelect('MAX(m.chatName)', 'chatName')
       .where('m.sessionId = :sessionId', { sessionId })
       .groupBy('m.chatId')
       .orderBy('count', 'DESC')
       .limit(10)
-      .getRawMany<{ chatId: string; count: string; lastActive: string }>();
+      .getRawMany<{ chatId: string; count: string; lastActive: string; chatName: string | null }>();
 
     // Hourly activity (last 24h)
     const hourlyActivity = await this.getHourlyActivity(sessionId);
@@ -264,6 +338,7 @@ export class StatsService {
       messages: { sent, received, today: todayCount, failed },
       topChats: topChats.map(c => ({
         chatId: c.chatId,
+        chatName: c.chatName ?? null,
         count: parseInt(c.count),
         lastActive: c.lastActive,
       })),
@@ -284,18 +359,22 @@ export class StatsService {
   }
 
   private async getTimeSeries(since: Date, interval: 'hour' | 'day'): Promise<TimeSeriesPoint[]> {
+    // Alias the bucket as `bucket`, not `timestamp`: `timestamp` is a reserved type keyword in
+    // PostgreSQL, so `GROUP BY timestamp` is not read as the output alias and the query 500s
+    // ("column m.createdAt must appear in the GROUP BY"). SQLite tolerates it, hence the dialect-only
+    // bug. The API field stays `timestamp` (mapped below).
     const raw = await this.messageRepo
       .createQueryBuilder('m')
-      .select(timeSeriesTimestampSql(this.dataDbType, interval), 'timestamp')
+      .select(timeSeriesTimestampSql(this.dataDbType, interval), 'bucket')
       .addSelect(`SUM(CASE WHEN m.direction = 'outgoing' THEN 1 ELSE 0 END)`, 'sent')
       .addSelect(`SUM(CASE WHEN m.direction = 'incoming' THEN 1 ELSE 0 END)`, 'received')
       .where('m.createdAt >= :since', { since })
-      .groupBy('timestamp')
-      .orderBy('timestamp', 'ASC')
-      .getRawMany<{ timestamp: string; sent: string; received: string }>();
+      .groupBy('bucket')
+      .orderBy('bucket', 'ASC')
+      .getRawMany<{ bucket: string; sent: string; received: string }>();
 
     return raw.map(r => ({
-      timestamp: r.timestamp,
+      timestamp: r.bucket,
       sent: parseInt(r.sent || '0'),
       received: parseInt(r.received || '0'),
     }));
